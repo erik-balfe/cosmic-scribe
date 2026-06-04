@@ -1,0 +1,48 @@
+[package]
+name = "voice-input"
+version = "0.1.0"
+edition = "2021"
+authors = ["Erik <erik.balfe@proton.me>"]
+description = "Cosmic Scribe — COSMIC desktop voice dictation via xAI Grok STT"
+repository = "https://github.com/erik-balfe/cosmic-scribe"
+homepage = "https://github.com/erik-balfe/cosmic-scribe"
+license = "MIT"
+readme = "README.md"
+keywords = ["voice", "dictation", "stt", "linux", "wayland", "tray"]
+categories = ["command-line-utilities"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+# Pedantic is enabled in CI once the tree is clean; ~100 lints today.
+pedantic = { level = "allow", priority = -1 }
+# Allow noisy pedantic lints; tighten over time.
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+strum = { version = "0.26", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart", "json", "blocking"] }
+hound = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+aes-gcm = "0.10"
+rand = "0.8"
+sha2 = "0.10"
+hkdf = "0.12"
+ksni = "0.3.4"
+rust-embed = "8.11.0"
+
+[dev-dependencies]
+wiremock = "0.6"

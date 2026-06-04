@@ -1,0 +1,2 @@
+# Project Clippy settings (https://doc.rust-lang.org/clippy/configuration.html)
+avoid-breaking-exported-api = false

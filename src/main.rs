@@ -1,0 +1,379 @@
+use ksni::TrayMethods;
+use std::sync::Arc;
+use voice_input::app::App;
+use voice_input::audio::{FileAudioCapture, SubprocessCapture};
+use voice_input::injector::WaylandInjector;
+use voice_input::ipc;
+use voice_input::keyring::{self, ConfigFileKeyring};
+use voice_input::lifecycle;
+use voice_input::logging;
+use voice_input::state::Event;
+use voice_input::stt::XaiSttClient;
+use voice_input::traits::SttClient;
+use voice_input::traits::{KeyringStore, TrayController};
+use voice_input::tray;
+use voice_input::web;
+
+struct CliTray;
+impl TrayController for CliTray {
+    fn set_state(&self, state: &str) {
+        eprintln!("  [state: {state}]");
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    logging::init();
+    check_deps();
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "--set-key") {
+        let key = args
+            .iter()
+            .skip_while(|a| *a != "--set-key")
+            .nth(1)
+            .cloned()
+            .unwrap_or_default();
+        ConfigFileKeyring.set_api_key(&key)?;
+        eprintln!("API key saved");
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--clear-key") {
+        ConfigFileKeyring.clear()?;
+        eprintln!("API key cleared");
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--set-lang") {
+        let lang = args
+            .iter()
+            .skip_while(|a| *a != "--set-lang")
+            .nth(1)
+            .cloned()
+            .unwrap_or_default();
+        keyring::set_language(&lang)?;
+        eprintln!("STT language set to: {lang}");
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--trigger") {
+        return trigger_mode().await;
+    }
+
+    if args.iter().any(|a| a == "--install")
+        || args.iter().any(|a| a.starts_with("--install-from="))
+    {
+        lifecycle::stop_daemon();
+        let source = lifecycle::resolve_install_source(&args)?;
+        lifecycle::install_binary_from(&source)?;
+        create_autostart()?;
+        lifecycle::start_daemon()?;
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--update") || args.iter().any(|a| a.starts_with("--update-from="))
+    {
+        lifecycle::update_from(&args)?;
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--stop" || a == "--quit") {
+        lifecycle::stop_daemon();
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--start") {
+        lifecycle::start_daemon()?;
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--restart") {
+        lifecycle::restart_daemon()?;
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--status") {
+        lifecycle::print_status();
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--autostart") {
+        create_autostart()?;
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--settings") {
+        println!("Starting web settings UI...");
+        web::run()?;
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--configure") {
+        return configure_mode();
+    }
+
+    if args.iter().any(|a| a == "--record-once") {
+        return record_once().await;
+    }
+
+    if let Some(path) = args
+        .iter()
+        .find(|a| a.starts_with("--file-input="))
+        .map(|a| a.strip_prefix("--file-input=").unwrap())
+    {
+        return file_input(path).await;
+    }
+
+    if args.iter().any(|a| a == "--daemon") {
+        return daemon_mode().await;
+    }
+
+    print_usage();
+    Ok(())
+}
+
+fn print_usage() {
+    eprintln!("Cosmic Scribe — record → Grok STT → insert text (wtype or clipboard)");
+    eprintln!();
+    eprintln!("Service (background daemon + tray):");
+    eprintln!("  --install            Stop daemon, install binary, autostart, start");
+    eprintln!("  --install-from=PATH  Install from PATH (default: release/cargo if newer)");
+    eprintln!("  --update             Stop → install from this binary → start");
+    eprintln!("  --update-from=PATH   Same, but copy from PATH (e.g. new release build)");
+    eprintln!("  --start              Start daemon if stopped");
+    eprintln!("  --stop | --quit      Stop daemon (tray goes away)");
+    eprintln!("  --restart            Stop then start daemon");
+    eprintln!("  --status             Running? installed path? IPC socket?");
+    eprintln!("  --daemon             Run in foreground (used by --start; not for daily use)");
+    eprintln!();
+    eprintln!("Dictation:");
+    eprintln!("  --trigger            Toggle recording on running daemon");
+    eprintln!("  --record-once        Record, transcribe, insert text, exit");
+    eprintln!("  --file-input=<path>  Transcribe pre-recorded raw PCM");
+    eprintln!();
+    eprintln!("Setup:");
+    eprintln!("  --configure          Interactive API key + language");
+    eprintln!("  --settings           Web UI (history + settings)");
+    eprintln!("  --autostart          Enable login autostart only");
+    eprintln!("  --set-key KEY        Store xAI API key");
+    eprintln!("  --clear-key          Remove stored API key");
+    eprintln!("  --set-lang LANG      Set STT language (default: en)");
+}
+
+async fn trigger_mode() -> anyhow::Result<()> {
+    ipc::send_toggle().await?;
+    tracing::info!("toggle sent");
+    Ok(())
+}
+
+async fn file_input(path: &str) -> anyhow::Result<()> {
+    let audio = FileAudioCapture::new(std::path::PathBuf::from(path));
+    let keyring = Arc::new(ConfigFileKeyring);
+    let stt: Arc<dyn SttClient> = Arc::new(XaiSttClient::new(keyring.clone()));
+
+    let mut app = App::new(
+        Box::new(audio),
+        stt,
+        Box::new(WaylandInjector),
+        keyring,
+        Box::new(CliTray),
+    );
+
+    let done = app.done_rx();
+    let tx = app.event_sender();
+    let handle = tokio::spawn(async move { app.run().await });
+
+    tx.send(Event::Toggle).ok(); // Idle → Recording
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tx.send(Event::Toggle).ok(); // Recording → Transcribing (triggers file read)
+
+    // Wait for processing to complete or timeout
+    let timeout = std::env::var("VOICE_INPUT_STT_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60_000);
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(timeout + 5000), done).await;
+    handle.abort();
+    tracing::info!("done");
+    Ok(())
+}
+
+async fn record_once() -> anyhow::Result<()> {
+    let keyring = Arc::new(ConfigFileKeyring);
+    let stt: Arc<dyn SttClient> = Arc::new(XaiSttClient::new(keyring.clone()));
+    let mut app = App::new(
+        Box::new(SubprocessCapture::new()),
+        stt,
+        Box::new(WaylandInjector),
+        keyring,
+        Box::new(CliTray),
+    );
+
+    let done = app.done_rx();
+    let tx = app.event_sender();
+
+    let handle = tokio::spawn(async move { app.run().await });
+
+    tx.send(Event::Toggle).ok();
+    tracing::info!("Recording... Press Ctrl+C to stop.");
+
+    tokio::signal::ctrl_c().await.ok();
+    tx.send(Event::Toggle).ok();
+
+    // Wait for processing to complete (with generous timeout)
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(90), done).await;
+
+    handle.abort();
+    tracing::info!("Done.");
+    Ok(())
+}
+
+async fn daemon_mode() -> anyhow::Result<()> {
+    let keyring = Arc::new(ConfigFileKeyring);
+    let stt: Arc<dyn SttClient> = Arc::new(XaiSttClient::new(keyring.clone()));
+    let mut app = App::new(
+        Box::new(SubprocessCapture::new()),
+        stt,
+        Box::new(WaylandInjector),
+        keyring,
+        Box::new(CliTray),
+    );
+
+    let tx = app.event_sender();
+
+    let voice_tray = tray::VoiceTray::new(tx.clone());
+    let tray_handle = voice_tray.spawn().await?;
+
+    app.set_tray_controller(Box::new(TrayHandle::new(tray_handle)));
+
+    let ipc_tx = tx.clone();
+    tokio::spawn(ipc::spawn_listener(ipc_tx));
+
+    tracing::info!(
+        "Cosmic Scribe daemon — use 'voice-input --trigger', tray click, or Ctrl+C to stop"
+    );
+
+    tokio::select! {
+        _ = app.run() => {},
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("shutting down");
+        }
+    }
+
+    Ok(())
+}
+
+struct TrayHandle {
+    handle: ksni::Handle<tray::VoiceTray>,
+}
+
+impl TrayHandle {
+    fn new(handle: ksni::Handle<tray::VoiceTray>) -> Self {
+        Self { handle }
+    }
+}
+
+impl TrayController for TrayHandle {
+    fn set_state(&self, state: &str) {
+        let state = state.to_string();
+        let handle = self.handle.clone();
+        tokio::spawn(async move {
+            let _ = handle
+                .update(move |tray: &mut tray::VoiceTray| {
+                    tray.set_state(&state);
+                })
+                .await;
+        });
+    }
+}
+
+fn configure_mode() -> anyhow::Result<()> {
+    use std::io::{self, Write};
+
+    let lang = keyring::get_language();
+    let has_key = ConfigFileKeyring.get_api_key().is_ok();
+
+    println!("=== Cosmic Scribe configuration ===\n");
+    println!(
+        "API key: {}",
+        if has_key { "**** (set)" } else { "(not set)" }
+    );
+    println!("Language: {}\n", lang);
+
+    print!("Enter API key (or press Enter to keep current): ");
+    io::stdout().flush().ok();
+    let mut key_input = String::new();
+    io::stdin().read_line(&mut key_input)?;
+    let key_input = key_input.trim().to_string();
+
+    if !key_input.is_empty() {
+        ConfigFileKeyring.set_api_key(&key_input)?;
+        println!("API key updated.");
+    }
+
+    print!("Language [en/ru/...] (or press Enter to keep '{lang}'): ");
+    io::stdout().flush().ok();
+    let mut lang_input = String::new();
+    io::stdin().read_line(&mut lang_input)?;
+    let lang_input = lang_input.trim().to_string();
+
+    if !lang_input.is_empty() {
+        keyring::set_language(&lang_input)?;
+        println!("Language set to: {lang_input}");
+    }
+
+    Ok(())
+}
+
+fn create_autostart() -> anyhow::Result<()> {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| "/tmp".into())
+        .join("autostart");
+    std::fs::create_dir_all(&dir)?;
+    let bin = lifecycle::daemon_binary();
+    let desktop = format!(
+        r#"[Desktop Entry]
+Type=Application
+Name=Cosmic Scribe
+Exec={bin} --daemon
+Icon=audio-input-microphone
+Comment=Voice dictation for COSMIC via xAI Grok STT
+X-GNOME-Autostart-enabled=true
+"#,
+        bin = bin.display()
+    );
+    std::fs::write(dir.join("voice-input.desktop"), desktop)?;
+    eprintln!("Autostart enabled: will start on login");
+    Ok(())
+}
+
+fn check_deps() {
+    use std::process::Command;
+
+    let missing: Vec<&str> = [
+        ("arecord", "alsa-utils (dnf install alsa-utils)"),
+        ("wl-copy", "wl-clipboard (dnf install wl-clipboard)"),
+        (
+            "wtype",
+            "wtype (dnf install wtype) — only if output mode is wtype",
+        ),
+        ("notify-send", "libnotify (dnf install libnotify)"),
+    ]
+    .iter()
+    .filter(|(bin, _)| {
+        !Command::new("which")
+            .arg(bin)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
+    .map(|(bin, pkg)| {
+        tracing::warn!("{bin} not found — install: {pkg}");
+        *bin
+    })
+    .collect();
+    if !missing.is_empty() {
+        tracing::warn!("{} missing dependencies", missing.len());
+    }
+}

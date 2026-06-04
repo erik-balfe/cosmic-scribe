@@ -1,0 +1,11 @@
+/target
+AGENTS.md
+docs/README-PRESENTATION.md
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+/test-assets/*.raw
+/test-assets/*.wav
+/web/node_modules
