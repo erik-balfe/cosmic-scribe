@@ -3,9 +3,9 @@ class VoiceInput < Formula
   homepage "https://github.com/erik-balfe/cosmic-scribe"
   license "MIT"
   # Builds from master tarball (no separate git clone). Repo must be public on GitHub.
-  url "https://github.com/erik-balfe/cosmic-scribe/archive/refs/heads/master.tar.gz"
+  url "https://github.com/erik-balfe/cosmic-scribe/archive/refs/tags/v0.1.0.tar.gz"
   version "0.1.0"
-  sha256 :no_check
+  sha256 "8daa62e3c36e8257167aa8a9858ad41b00be7f6556b208af89814fda84767817"
 
   depends_on "rust" => :build
 
