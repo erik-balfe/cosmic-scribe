@@ -61,6 +61,11 @@ async fn main() -> anyhow::Result<()> {
         return trigger_mode().await;
     }
 
+    if args.iter().any(|a| a == "--uninstall") {
+        let purge = args.iter().any(|a| a == "--purge");
+        return lifecycle::uninstall(purge);
+    }
+
     if args.iter().any(|a| a == "--install")
         || args.iter().any(|a| a.starts_with("--install-from="))
     {
@@ -145,6 +150,8 @@ fn print_usage() {
     eprintln!("  --stop | --quit      Stop daemon (tray goes away)");
     eprintln!("  --restart            Stop then start daemon");
     eprintln!("  --status             Running? installed path? IPC socket?");
+    eprintln!("  --uninstall          Stop daemon; remove ~/.local install + autostart");
+    eprintln!("  --purge              With --uninstall: also delete ~/.local/share/voice-input/");
     eprintln!("  --daemon             Run in foreground (used by --start; not for daily use)");
     eprintln!();
     eprintln!("Dictation:");
@@ -312,7 +319,7 @@ fn configure_mode() -> anyhow::Result<()> {
         println!("API key updated.");
     }
 
-    print!("Language [en/ru/...] (or press Enter to keep '{lang}'): ");
+    print!("Language code for STT (default en; press Enter to keep '{lang}'): ");
     io::stdout().flush().ok();
     let mut lang_input = String::new();
     io::stdin().read_line(&mut lang_input)?;
@@ -327,10 +334,10 @@ fn configure_mode() -> anyhow::Result<()> {
 }
 
 fn create_autostart() -> anyhow::Result<()> {
-    let dir = dirs::config_dir()
-        .unwrap_or_else(|| "/tmp".into())
-        .join("autostart");
-    std::fs::create_dir_all(&dir)?;
+    let path = lifecycle::autostart_desktop_file();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let bin = lifecycle::daemon_binary();
     let desktop = format!(
         r#"[Desktop Entry]
@@ -343,7 +350,7 @@ X-GNOME-Autostart-enabled=true
 "#,
         bin = bin.display()
     );
-    std::fs::write(dir.join("voice-input.desktop"), desktop)?;
+    std::fs::write(&path, desktop)?;
     eprintln!("Autostart enabled: will start on login");
     Ok(())
 }

@@ -27,6 +27,11 @@ class VoiceInput < Formula
           brew upgrade voice-input
           "$(brew --prefix)/bin/voice-input" --update
 
+        Uninstall user install + tray:
+          "$(brew --prefix)/bin/voice-input" --uninstall
+        Remove Homebrew package:
+          brew uninstall voice-input
+
         Service: --start | --stop | --restart | --status
 
         Bind a global shortcut to: voice-input --trigger

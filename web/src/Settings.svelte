@@ -56,10 +56,8 @@
     <input type="password" name="key" placeholder={hasKey ? '(stored)' : 'sk-...'} autocomplete="off">
   </label>
   <label><span>Language</span>
-    <select bind:value={lang}>
-      <option value="en">English</option><option value="ru">Русский</option>
-      <option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option>
-    </select>
+    <input type="text" bind:value={lang} placeholder="en" autocomplete="off" spellcheck="false" />
+    <span class="field-hint">Code sent to xAI STT (e.g. en, de, ja). Default is en.</span>
   </label>
   <label><span>Text output</span>
     <select bind:value={outputMode}>
@@ -98,4 +96,5 @@
     margin-left: 6px; vertical-align: middle;
   }
   .beta-hint { display: block; font-size: 12px; color: #888; margin: 4px 0 8px; line-height: 1.4; }
+  .field-hint { display: block; font-size: 12px; color: #888; margin-top: 4px; line-height: 1.4; }
 </style>

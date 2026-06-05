@@ -301,6 +301,89 @@ pub fn restart_daemon() -> anyhow::Result<()> {
     start_daemon()
 }
 
+pub fn autostart_desktop_file() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("autostart")
+        .join("voice-input.desktop")
+}
+
+pub fn data_dir() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("voice-input")
+}
+
+/// Remove daemon install (wrapper, share copy, autostart, IPC socket).
+/// Does not remove the binary you are running from (e.g. Homebrew cellar).
+/// Use `--purge` to delete `~/.local/share/voice-input/` (keys, recordings, settings).
+pub fn uninstall(purge: bool) -> anyhow::Result<()> {
+    stop_daemon();
+
+    let wrapper = wrapper_binary();
+    let share = share_binary();
+    let autostart = autostart_desktop_file();
+    let sock = crate::ipc::socket_path();
+    let current = std::env::current_exe().ok();
+
+    if wrapper.exists() {
+        if wrapper.is_symlink() {
+            std::fs::remove_file(&wrapper)?;
+            eprintln!("Removed: {}", wrapper.display());
+        } else if current.as_ref() == Some(&wrapper) {
+            eprintln!(
+                "Skipped wrapper {} (this executable — exit first, then delete manually)",
+                wrapper.display()
+            );
+        } else {
+            std::fs::remove_file(&wrapper)?;
+            eprintln!("Removed: {}", wrapper.display());
+        }
+    }
+
+    if share.exists() {
+        if current.as_ref() == Some(&share) {
+            eprintln!(
+                "Skipped share binary {} (this executable — exit first, then delete manually)",
+                share.display()
+            );
+        } else {
+            std::fs::remove_file(&share)?;
+            eprintln!("Removed: {}", share.display());
+        }
+    }
+
+    if autostart.exists() {
+        std::fs::remove_file(&autostart)?;
+        eprintln!("Removed: {}", autostart.display());
+    }
+
+    if sock.exists() {
+        std::fs::remove_file(&sock)?;
+        eprintln!("Removed: {}", sock.display());
+    }
+
+    if purge {
+        let dir = data_dir();
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+            eprintln!("Removed data directory: {}", dir.display());
+        }
+    } else {
+        eprintln!(
+            "Kept settings and history in {} (use --purge to delete)",
+            data_dir().display()
+        );
+    }
+
+    eprintln!();
+    eprintln!("If your shell still says 'voice-input: No such file or directory', run: hash -r");
+    eprintln!("Homebrew package (if any) is separate: brew uninstall voice-input");
+    eprintln!("Then install again: voice-input --install  (or $(brew --prefix)/bin/voice-input --install)");
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
