@@ -23,7 +23,12 @@ voice-input --install
 voice-input --configure
 ```
 
-Formula uses the public `master` tarball (`sha256 :no_check` until first release tag). Pin `url` + `sha256` when tagging `v0.1.0`.
+On each `v*` tag, [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs `scripts/update-formula.sh` to pin `url` + `sha256` on `master` and creates a GitHub Release.
+
+```bash
+jj git tag set v0.1.0 -r master
+jj git push --bookmark master --tags
+```
 
 Test locally (tap clones git — commit first):
 
