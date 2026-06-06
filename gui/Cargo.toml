@@ -2,12 +2,24 @@
 name = "cosmic-scribe-gui"
 version = "0.1.0"
 edition = "2021"
-description = "Cosmic Scribe — native UI window (Tauri spike)"
+description = "Cosmic Scribe — native Tauri UI window"
 license = "MIT"
+
+[features]
+debug-gui = ["tauri/devtools"]
+
+[[bin]]
+name = "cosmic-scribe-gui"
+path = "src/main.rs"
+
+[[bin]]
+name = "cosmic-scribe-gui-debug"
+path = "src/main.rs"
+required-features = ["debug-gui"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 cosmic-scribe = { path = ".." }
-tauri = { version = "2", features = ["devtools"] }
+tauri = { version = "2", features = [] }

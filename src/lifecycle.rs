@@ -40,9 +40,106 @@ pub fn data_dir() -> PathBuf {
 }
 
 pub fn recordings_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("COSMIC_SCRIBE_RECORDINGS_DIR") {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).ok();
+        return dir;
+    }
     let dir = data_dir().join("recordings");
     std::fs::create_dir_all(&dir).ok();
     dir
+}
+
+fn gui_lock_path() -> PathBuf {
+    data_dir().join("gui.lock")
+}
+
+pub fn gui_binary_path(debug: bool) -> PathBuf {
+    let name = if debug {
+        "cosmic-scribe-gui-debug"
+    } else {
+        "cosmic-scribe-gui"
+    };
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".local/bin")
+        .join(name)
+}
+
+/// Spawn prod Tauri window (History or Settings). Single instance enforced by `gui.lock`.
+pub fn spawn_gui(settings: bool) -> anyhow::Result<()> {
+    let bin = gui_binary_path(false);
+    if !bin.is_file() {
+        anyhow::bail!(
+            "cosmic-scribe-gui not installed at {}. Run: ./scripts/install-gui-prod.sh",
+            bin.display()
+        );
+    }
+    let mut cmd = Command::new(&bin);
+    cmd.env("GTK_APPLICATION_ID", "com.cosmic-scribe.gui");
+    cmd.env("GDK_APPLICATION_NAME", "Cosmic Scribe");
+    if settings {
+        cmd.arg("--settings");
+    }
+    cmd.spawn()?;
+    Ok(())
+}
+
+pub fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Returns `Err(pid)` when another GUI instance is running (prod or debug).
+pub fn try_acquire_gui_lock(_debug: bool) -> Result<(), u32> {
+    let path = gui_lock_path();
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(pid) = raw.lines().next().unwrap_or("").trim().parse::<u32>() {
+            if process_alive(pid) {
+                return Err(pid);
+            }
+        }
+    }
+    let pid = std::process::id();
+    let _ = std::fs::write(&path, format!("{pid}\n"));
+    Ok(())
+}
+
+pub fn release_gui_lock(_debug: bool) {
+    let path = gui_lock_path();
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(lock_pid) = raw.lines().next().unwrap_or("").trim().parse::<u32>() {
+            if lock_pid == std::process::id() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+}
+
+/// Returns `Err(pid)` when another GUI instance is running.
+pub fn try_acquire_gui_debug_lock() -> Result<(), u32> {
+    try_acquire_gui_lock(true)
+}
+
+pub fn release_gui_debug_lock() {
+    release_gui_lock(true);
+}
+
+#[cfg(test)]
+pub fn init_test_recordings_dir() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let base = std::env::temp_dir().join(format!(
+            "cosmic-scribe-test-recordings-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&base).ok();
+        std::env::set_var("COSMIC_SCRIBE_RECORDINGS_DIR", &base);
+    });
 }
 
 fn legacy_data_dir() -> PathBuf {
@@ -89,15 +186,37 @@ fn legacy_socket_path() -> PathBuf {
         .join(format!("{LEGACY_SLUG}.sock"))
 }
 
+fn debug_gui_binary() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".local/bin")
+        .join("cosmic-scribe-gui-debug")
+}
+
+fn legacy_share_binary_in_current_data_dir() -> PathBuf {
+    data_dir().join(LEGACY_SLUG)
+}
+
 pub fn remove_legacy_install_artifacts() {
     for path in [
         legacy_wrapper_binary(),
         legacy_share_binary(),
         legacy_autostart_desktop_file(),
         legacy_socket_path(),
+        debug_gui_binary(),
+        legacy_share_binary_in_current_data_dir(),
     ] {
         if path.exists() {
             let _ = std::fs::remove_file(&path);
+            tracing::info!("removed legacy install artifact: {}", path.display());
+        }
+    }
+
+    for lock in ["ui-browser.lock", "gui-debug.lock"] {
+        let path = data_dir().join(lock);
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+            tracing::info!("removed stale lock: {}", path.display());
         }
     }
 }

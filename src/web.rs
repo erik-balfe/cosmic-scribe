@@ -4,8 +4,9 @@
 
 use crate::traits::KeyringStore;
 use rust_embed::RustEmbed;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
+use std::path::PathBuf;
 
 #[derive(RustEmbed)]
 #[folder = "web/dist"]
@@ -96,7 +97,11 @@ fn api_history(path: &str) -> (String, String, String) {
     if let Ok(read_dir) = std::fs::read_dir(&dir) {
         let mut raws: Vec<_> = read_dir
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map(|x| x == "raw").unwrap_or(false))
+            .filter(|e| {
+                let p = e.path();
+                p.extension().map(|x| x == "raw").unwrap_or(false)
+                    && !crate::recording::is_junk_recording(&p)
+            })
             .collect();
         raws.sort_by_key(|e| {
             std::fs::metadata(e.path())
@@ -167,11 +172,7 @@ fn api_recording_get(path: &str) -> (String, String, String) {
         .unwrap_or(serde_json::json!({}));
 
     let parts: Vec<&str> = id.split('_').collect();
-    let ts = format!(
-        "{}T{}",
-        parts.first().unwrap_or(&""),
-        parts.get(1).unwrap_or(&"")
-    );
+    let ts = ts_to_human(&parts);
     let dur = parts.last().unwrap_or(&"0").replace("ms", "");
     let dur_secs = dur.parse::<u64>().unwrap_or(0) / 1000;
 
@@ -522,6 +523,7 @@ fn api_config_get() -> (String, String, String) {
     let json = serde_json::json!({
         "lang": crate::keyring::get_language(),
         "output_mode": crate::keyring::get_output_mode(),
+        "history_time_mode": crate::keyring::get_history_time_mode(),
         "has_key": has_key,
         "has_correction_key": has_correction_key,
         "correction_model": correction_model,
@@ -533,32 +535,61 @@ fn api_config_get() -> (String, String, String) {
 fn api_config_post(body: &str) -> (String, String, String) {
     let v: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
-        Err(e) => return ("400 Bad Request".into(), "text/plain".into(), e.to_string()),
+        Err(e) => {
+            return config_error(400, &format!("invalid JSON: {e}"));
+        }
     };
+    if body.trim().is_empty() {
+        return config_error(400, "empty request body");
+    }
     if let Some(lang) = v.get("lang").and_then(|l| l.as_str()) {
-        let _ = crate::keyring::set_language(lang);
+        if let Err(e) = crate::keyring::set_language(lang) {
+            return config_error(500, &e.to_string());
+        }
     }
     if let Some(mode) = v.get("output_mode").and_then(|m| m.as_str()) {
-        let _ = crate::keyring::set_output_mode(mode);
+        if let Err(e) = crate::keyring::set_output_mode(mode) {
+            return config_error(400, &e.to_string());
+        }
+    }
+    if let Some(mode) = v.get("history_time_mode").and_then(|m| m.as_str()) {
+        if let Err(e) = crate::keyring::set_history_time_mode(mode) {
+            return config_error(400, &e.to_string());
+        }
     }
     if let Some(key) = v.get("key").and_then(|k| k.as_str()) {
         if !key.is_empty() {
-            let _ = crate::keyring::ConfigFileKeyring.set_api_key(key);
+            if let Err(e) = crate::keyring::ConfigFileKeyring.set_api_key(key) {
+                return config_error(500, &e.to_string());
+            }
         }
     }
     if let Some(ck) = v.get("correction_key").and_then(|k| k.as_str()) {
         if !ck.is_empty() {
-            let _ = crate::keyring::set_correction_key(ck);
+            if let Err(e) = crate::keyring::set_correction_key(ck) {
+                return config_error(500, &e.to_string());
+            }
         }
     }
     if let Some(cm) = v.get("correction_model").and_then(|m| m.as_str()) {
-        let _ = crate::keyring::set_correction_model(cm);
+        if let Err(e) = crate::keyring::set_correction_model(cm) {
+            return config_error(500, &e.to_string());
+        }
     }
     (
         "200 OK".into(),
         "application/json".into(),
         r#"{"ok":true}"#.into(),
     )
+}
+
+fn config_error(status: u16, message: &str) -> (String, String, String) {
+    let status_line = match status {
+        400 => "400 Bad Request",
+        _ => "500 Internal Server Error",
+    };
+    let json = serde_json::json!({ "ok": false, "error": message }).to_string();
+    (status_line.into(), "application/json".into(), json)
 }
 
 fn serve_audio(stream: &std::net::TcpStream, req: &str) {
@@ -720,8 +751,17 @@ fn serve_listener(listener: TcpListener) {
     }
 }
 
+fn prune_junk_recordings_on_ui_start() {
+    let dir = recordings_dir();
+    let n = crate::recording::prune_junk_recordings(&dir);
+    if n > 0 {
+        tracing::info!("pruned {n} junk recording(s) from {}", dir.display());
+    }
+}
+
 /// Start the embedded UI API server on a background thread. Returns the URL to load (for Tauri / tests).
 pub fn spawn_server(start_path: &str) -> anyhow::Result<String> {
+    prune_junk_recordings_on_ui_start();
     std::thread::spawn(load_models_cache);
 
     let listener = TcpListener::bind("127.0.0.1:0")?;
@@ -731,38 +771,144 @@ pub fn spawn_server(start_path: &str) -> anyhow::Result<String> {
     Ok(url)
 }
 
+fn ui_lock_path() -> PathBuf {
+    crate::lifecycle::data_dir().join("ui-browser.lock")
+}
+
+fn process_alive(pid: u32) -> bool {
+    crate::lifecycle::process_alive(pid)
+}
+
+fn read_ui_lock() -> Option<(u32, String)> {
+    let raw = std::fs::read_to_string(ui_lock_path()).ok()?;
+    let mut lines = raw.lines();
+    let pid: u32 = lines.next()?.trim().parse().ok()?;
+    let base = lines.next()?.trim().to_string();
+    if base.is_empty() {
+        return None;
+    }
+    Some((pid, base))
+}
+
+fn write_ui_lock(pid: u32, base_url: &str) {
+    let path = ui_lock_path();
+    let _ = std::fs::write(path, format!("{pid}\n{base_url}\n"));
+}
+
+fn clear_ui_lock() {
+    let _ = std::fs::remove_file(ui_lock_path());
+}
+
+fn open_in_browser(url: &str) {
+    if crate::env_compat("COSMIC_SCRIBE_NO_BROWSER", "VOICE_INPUT_NO_BROWSER").is_some() {
+        return;
+    }
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("xdg-open '{url}' >/dev/null 2>&1 &"))
+        .spawn();
+}
+
+/// Open the browser UI at `start_path`, reusing an existing server when possible.
+pub fn open_ui(start_path: &str) -> anyhow::Result<()> {
+    if let Some((pid, base)) = read_ui_lock() {
+        if process_alive(pid) {
+            let url = format!(
+                "{base}{}",
+                if start_path.is_empty() || start_path == "/" {
+                    String::new()
+                } else {
+                    start_path.to_string()
+                }
+            );
+            open_in_browser(&url);
+            return Ok(());
+        }
+        clear_ui_lock();
+    }
+    run_at(start_path)
+}
+
 pub fn run() -> anyhow::Result<()> {
     run_at("/")
 }
 
 pub fn run_at(start_path: &str) -> anyhow::Result<()> {
+    prune_junk_recordings_on_ui_start();
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
+    let base_url = ui_url(addr, "");
     let url = ui_url(addr, start_path);
+    let pid = std::process::id();
+    write_ui_lock(pid, &base_url);
     println!("UI: {}", url);
-    if crate::env_compat("COSMIC_SCRIBE_NO_BROWSER", "VOICE_INPUT_NO_BROWSER").is_none() {
-        let _ = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("xdg-open '{url}' >/dev/null 2>&1 &"))
-            .spawn();
-    }
+    open_in_browser(&url);
 
-    serve_listener(listener);
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| serve_listener(listener)));
+    clear_ui_lock();
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
     Ok(())
 }
 
-fn handle_request(stream: &std::net::TcpStream) {
-    let mut buf = [0u8; 8192];
-    let mut reader = match stream.try_clone() {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-    let n = reader.read(&mut buf).unwrap_or(0);
-    let raw = String::from_utf8_lossy(&buf[..n]);
-    let req_line = raw.lines().next().unwrap_or("");
+fn read_http_request(stream: &std::net::TcpStream) -> Option<(String, String)> {
+    use std::io::Read;
+    let mut reader = stream.try_clone().ok()?;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
 
-    let body_start = raw.find("\r\n\r\n").map(|i| i + 4).unwrap_or(raw.len());
-    let body = &raw[body_start..];
+    loop {
+        let n = reader.read(&mut chunk).ok()?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > 1_048_576 {
+            return None;
+        }
+    }
+
+    let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n")? + 4;
+    let headers = String::from_utf8_lossy(&buf[..header_end]);
+    let req_line = headers.lines().next()?.to_string();
+
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+
+    let mut body = buf[header_end..].to_vec();
+    while body.len() < content_length {
+        let n = reader.read(&mut chunk).ok()?;
+        if n == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..n]);
+        if body.len() > 1_048_576 {
+            return None;
+        }
+    }
+    body.truncate(content_length);
+    let body = String::from_utf8_lossy(&body).into_owned();
+    Some((req_line, body))
+}
+
+fn handle_request(stream: &std::net::TcpStream) {
+    let Some((req_line, body)) = read_http_request(stream) else {
+        return;
+    };
 
     let (status, content_type, body_text) = if req_line.starts_with("GET")
         && !req_line.contains("/api/")
@@ -780,11 +926,12 @@ fn handle_request(stream: &std::net::TcpStream) {
         }
         return;
     } else if req_line.contains("/api/recording/") && req_line.contains("/audio") {
-        serve_audio(stream, req_line);
+        serve_audio(stream, &req_line);
         return;
     } else {
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_api(req_line, body)));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle_api(&req_line, &body)
+        }));
         match result {
             Ok(r) => r,
             Err(e) => {
@@ -815,8 +962,13 @@ fn handle_request(stream: &std::net::TcpStream) {
 mod tests {
     use super::*;
 
+    fn init_tests() {
+        crate::lifecycle::init_test_recordings_dir();
+    }
+
     #[test]
     fn test_waveform_i16_min_no_panic() {
+        init_tests();
         // i16::MIN.abs() panics in debug mode — must handle safely
         let samples: Vec<u8> = vec![0x00u8, 0x80u8, 0x00, 0x00]; // i16::MIN then 0
         let dir = recordings_dir();
@@ -830,7 +982,69 @@ mod tests {
     }
 
     #[test]
+    fn test_api_config_post_accepts_wtype() {
+        init_tests();
+        let body =
+            r#"{"lang":"en","output_mode":"wtype","correction_model":"deepseek/deepseek-chat-v4"}"#;
+        let (status, ct, resp) = api_config_post(body);
+        assert_eq!(status, "200 OK");
+        assert_eq!(ct, "application/json");
+        let json: serde_json::Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(json["ok"], true);
+    }
+
+    #[test]
+    fn test_api_config_post_rejects_invalid_output_mode() {
+        init_tests();
+        let body = r#"{"output_mode":"auto"}"#;
+        let (status, _, resp) = api_config_post(body);
+        assert_eq!(status, "400 Bad Request");
+        let json: serde_json::Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(json["ok"], false);
+        assert!(json["error"].as_str().unwrap().contains("wtype"));
+    }
+
+    #[test]
+    fn test_api_config_post_rejects_empty_body() {
+        init_tests();
+        let (status, _, _) = api_config_post("");
+        assert_eq!(status, "400 Bad Request");
+    }
+
+    #[test]
+    fn test_read_http_request_reads_split_post_body() {
+        init_tests();
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = r#"{"lang":"en","output_mode":"wtype"}"#;
+        let req = format!(
+            "POST /api/config HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut payload = req.into_bytes();
+            payload.extend_from_slice(body.as_bytes());
+            stream.write_all(&payload).unwrap();
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+            let mut discard = [0u8; 1024];
+            let _ = stream.read(&mut discard);
+        });
+
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let (req_line, read_body) = read_http_request(&client).unwrap();
+        assert!(req_line.starts_with("POST /api/config"));
+        assert_eq!(read_body, body);
+        let _ = client.shutdown(std::net::Shutdown::Both);
+    }
+
+    #[test]
     fn test_recording_get_works_with_new_format() {
+        init_tests();
         let dir = recordings_dir();
         std::fs::create_dir_all(&dir).ok();
         let raw = vec![0u8; 32000];
@@ -844,6 +1058,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["file"], id);
         assert_eq!(json["text"], "test transcript");
+        assert_eq!(json["ts"], "2026-06-01 15:13:17");
 
         let _ = std::fs::remove_file(dir.join(format!("{id}.raw")));
         let _ = std::fs::remove_file(dir.join(format!("{id}.txt")));

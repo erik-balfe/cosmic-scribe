@@ -45,8 +45,11 @@ aes-gcm = "0.10"
 rand = "0.8"
 sha2 = "0.10"
 hkdf = "0.12"
+futures-util = "0.3"
 ksni = "0.3.4"
+png = "0.17"
 rust-embed = "8.11.0"
+zbus = { version = "5.15", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
 wiremock = "0.6"

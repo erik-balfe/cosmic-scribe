@@ -1,100 +1,149 @@
 <script>
   import Combobox from './lib/Combobox.svelte';
+  import Select from './lib/Select.svelte';
+
+  let { historyTimeMode = $bindable('relative'), onsaved } = $props();
 
   let lang = $state('en');
-  let outputMode = $state('auto');
+  let outputMode = $state('wtype');
   let hasKey = $state(false);
   let hasCorrectionKey = $state(false);
   let correctionModel = $state('deepseek/deepseek-chat-v4');
   let saved = $state(false);
   let error = $state('');
+  let saving = $state(false);
   let models = $state([]);
+  let apiKey = $state('');
+  let correctionKey = $state('');
+
+  const outputOptions = [
+    { value: 'wtype', label: 'wtype — type into focused field (default)' },
+    { value: 'clipboard', label: 'Clipboard — copy only, you paste (terminals)' },
+  ];
+
+  const timeModeOptions = [
+    { value: 'relative', label: 'Relative — e.g. 2h ago (hover for exact time)' },
+    { value: 'absolute', label: 'Absolute — e.g. Jun 6, 9:15 PM (hover for relative)' },
+  ];
 
   async function load() {
-    const [cr, mr] = await Promise.all([
-      fetch('/api/config'),
-      fetch('/api/models')
-    ]);
-    const c = await cr.json();
-    lang = c.lang || 'en';
-    outputMode = c.output_mode === 'clipboard' ? 'clipboard' : 'wtype';
-    hasKey = c.has_key;
-    hasCorrectionKey = c.has_correction_key;
-    correctionModel = c.correction_model || 'deepseek/deepseek-chat-v4';
-    const m = await mr.json();
-    if (Array.isArray(m)) models = m;
+    error = '';
+    try {
+      const [cr, mr] = await Promise.all([
+        fetch('/api/config'),
+        fetch('/api/models'),
+      ]);
+      if (!cr.ok) {
+        error = `Failed to load settings (${cr.status})`;
+        return;
+      }
+      const c = await cr.json();
+      lang = c.lang || 'en';
+      outputMode = c.output_mode === 'clipboard' ? 'clipboard' : 'wtype';
+      historyTimeMode = c.history_time_mode === 'absolute' ? 'absolute' : 'relative';
+      hasKey = c.has_key;
+      hasCorrectionKey = c.has_correction_key;
+      correctionModel = c.correction_model || 'deepseek/deepseek-chat-v4';
+      if (mr.ok) {
+        const m = await mr.json();
+        if (Array.isArray(m)) models = m;
+      }
+    } catch {
+      error = 'Failed to load settings';
+    }
   }
   load();
 
   async function save(e) {
     e.preventDefault();
-    const key = e.target.key.value;
-    const ckey = e.target.correction_key.value;
-    const body = { lang, output_mode: outputMode, correction_model: correctionModel };
-    if (key) body.key = key;
-    if (ckey) body.correction_key = ckey;
-    const r = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (r.ok) {
-      saved = true;
-      e.target.key.value = '';
-      e.target.correction_key.value = '';
-      if (key) hasKey = true;
-      if (ckey) hasCorrectionKey = true;
-      setTimeout(() => saved = false, 2000);
-    } else {
-      error = 'Save failed';
+    saving = true;
+    error = '';
+    saved = false;
+    const body = {
+      lang,
+      output_mode: outputMode,
+      history_time_mode: historyTimeMode,
+      correction_model: correctionModel,
+    };
+    if (apiKey) body.key = apiKey;
+    if (correctionKey) body.correction_key = correctionKey;
+    try {
+      const r = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await r.text();
+      if (r.ok) {
+        saved = true;
+        apiKey = '';
+        correctionKey = '';
+        if (body.key) hasKey = true;
+        if (body.correction_key) hasCorrectionKey = true;
+        setTimeout(() => saved = false, 2000);
+        onsaved?.();
+      } else {
+        let msg = text.trim();
+        try {
+          const j = JSON.parse(text);
+          msg = j.error || j.text || msg;
+        } catch { /* plain text */ }
+        error = msg || `Save failed (${r.status})`;
+      }
+    } catch {
+      error = 'Network error — could not reach the app server';
     }
+    saving = false;
   }
 </script>
 
-<form onsubmit={save}>
-  <label><span>API Key</span>
-    <input type="password" name="key" placeholder={hasKey ? '(stored)' : 'sk-...'} autocomplete="off">
+<form class="panel" onsubmit={save}>
+  <label>
+    <span>API Key</span>
+    <input type="password" bind:value={apiKey} placeholder={hasKey ? '(stored)' : 'sk-...'} autocomplete="off">
   </label>
-  <label><span>Language</span>
+  <label>
+    <span>Language</span>
     <input type="text" bind:value={lang} placeholder="en" autocomplete="off" spellcheck="false" />
     <span class="field-hint">Code sent to xAI STT (e.g. en, de, ja). Default is en.</span>
   </label>
-  <label><span>Text output</span>
-    <select bind:value={outputMode}>
-      <option value="wtype">wtype — type into focused field (default)</option>
-      <option value="clipboard">Clipboard — copy only, you paste (terminals)</option>
-    </select>
+  <label>
+    <span>Text output</span>
+    <Select options={outputOptions} bind:value={outputMode} />
   </label>
-  <label><span>OpenRouter Key <span class="beta">beta</span></span>
-    <span class="beta-hint">AI correction is experimental — marking words and “Fix with AI” may give poor results.</span>
-    <input type="password" name="correction_key" placeholder={hasCorrectionKey ? '(stored)' : 'sk-or-v1-...'} autocomplete="off">
+  <label>
+    <span>History timestamps</span>
+    <Select options={timeModeOptions} bind:value={historyTimeMode} />
   </label>
-  <label><span>Correction Model <span class="beta">beta</span></span>
+  <label>
+    <span>OpenRouter Key <span class="beta">beta</span></span>
+    <span class="field-hint beta-hint">AI correction is experimental — marking words and “Fix with AI” may give poor results.</span>
+    <input type="password" bind:value={correctionKey} placeholder={hasCorrectionKey ? '(stored)' : 'sk-or-v1-...'} autocomplete="off">
+  </label>
+  <label>
+    <span>Correction Model <span class="beta">beta</span></span>
     <Combobox options={models} bind:value={correctionModel} placeholder="Select model..." />
   </label>
-  <button type="submit">Save</button>
-  {#if saved}<span class="ok">Saved</span>{/if}
-  {#if error}<span class="err">{error}</span>{/if}
+  <div class="actions">
+    <button class="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+    <span class="status" aria-live="polite">
+      {#if saved}<span class="ok">Saved</span>{/if}
+      {#if error}<span class="err">{error}</span>{/if}
+    </span>
+  </div>
 </form>
 
 <style>
-  form { background: #16213e; border-radius: 12px; padding: 24px; }
-  label { display: block; margin-bottom: 16px; }
-  label span { display: block; font-size: 13px; color: #aaa; margin-bottom: 6px; }
-  input, select {
-    width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #333;
-    background: #0f3460; color: #fff; font-size: 14px;
+  form label { display: block; margin-bottom: 16px; }
+  form label > span:first-child {
+    display: block;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
   }
-  input:focus, select:focus { outline: none; border-color: #e94560; }
-  button { background: #e94560; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; }
-  button:hover { background: #d63851; }
-  .ok { color: #95d5b2; margin-left: 12px; font-size: 13px; }
-  .err { color: #e94560; margin-left: 12px; font-size: 13px; }
-  .beta {
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-    color: #f4a261; background: rgba(244, 162, 97, 0.15); padding: 2px 6px; border-radius: 4px;
-    margin-left: 6px; vertical-align: middle;
-  }
-  .beta-hint { display: block; font-size: 12px; color: #888; margin: 4px 0 8px; line-height: 1.4; }
-  .field-hint { display: block; font-size: 12px; color: #888; margin-top: 4px; line-height: 1.4; }
+  .beta-hint { margin: 4px 0 8px; }
+  .actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; min-height: 40px; }
+  .status { min-width: 0; flex: 1; min-height: 20px; }
+  .ok { color: var(--success); font-size: 13px; }
+  .err { color: var(--danger); font-size: 13px; line-height: 1.4; }
 </style>

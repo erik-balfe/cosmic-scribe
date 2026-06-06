@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Cosmic Scribe
+GenericName=Voice dictation
+Comment=Recording history and settings
+Exec=cosmic-scribe-gui %U
+Icon=com.cosmic-scribe.gui
+StartupWMClass=Cosmic Scribe
+DBusActivatable=true
+Categories=Utility;
+Terminal=false
+SingleMainWindow=true

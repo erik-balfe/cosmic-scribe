@@ -143,6 +143,31 @@ pub fn set_output_mode(mode: &str) -> Result<()> {
     Ok(())
 }
 
+fn history_time_mode_path() -> PathBuf {
+    config_dir().join("history-time-mode")
+}
+
+/// `relative` (default) or `absolute` timestamps in history UI.
+pub fn get_history_time_mode() -> String {
+    let raw = fs::read_to_string(history_time_mode_path())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "relative".to_string());
+    match raw.as_str() {
+        "absolute" => "absolute".to_string(),
+        _ => "relative".to_string(),
+    }
+}
+
+pub fn set_history_time_mode(mode: &str) -> Result<()> {
+    let mode = match mode.trim() {
+        "relative" => "relative",
+        "absolute" => "absolute",
+        other => anyhow::bail!("history time mode must be 'relative' or 'absolute', got '{other}'"),
+    };
+    fs::write(history_time_mode_path(), mode)?;
+    Ok(())
+}
+
 fn correction_key_path() -> PathBuf {
     config_dir().join("correction-key")
 }

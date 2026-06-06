@@ -127,12 +127,20 @@ If audio fails in WebKitGTK, alternatives:
 | 3 | open | You test: History list, audio playback, Settings save |
 | 4 | open | Replace `xdg-open` tray paths with `cosmic-scribe-gui` |
 
-Run spike (after `cd web && npm run build`):
+Run spike (isolated from prod):
 
 ```bash
-cd gui && cargo tauri dev
-# or: cargo run -p cosmic-scribe-gui
+cd web && npm run build
+./scripts/install-gui-debug.sh
+cosmic-scribe-gui-debug              # History
+cosmic-scribe-gui-debug --settings   # Settings
 ```
+
+Uses **same config/data** as prod (`~/.local/share/cosmic-scribe/`). Prod daemon untouched.
+
+Remove GUI binary only: `./scripts/uninstall-gui-debug.sh`
+
+**Build note:** if `pkg-config` is from Homebrew, the install script sets `PKG_CONFIG_PATH` to include `/usr/lib64/pkgconfig` (Fedora system -devel packages).
 
 Fedora build deps (install once):
 

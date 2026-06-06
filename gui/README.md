@@ -1,21 +1,27 @@
-# Cosmic Scribe GUI (Tauri spike)
+# Cosmic Scribe GUI (Tauri spike, debug)
 
-Native window for History and Settings. See [docs/TAURI.md](../docs/TAURI.md).
+Native window for History and Settings. Binary `cosmic-scribe-gui-debug` only — **same data** as prod (`~/.local/share/cosmic-scribe/`). Does not install or replace the prod daemon.
 
-## Build
+See [docs/TAURI.md](../docs/TAURI.md).
+
+## Install (recommended)
 
 ```bash
 cd ../web && npm run build
-cd ../gui
-sudo dnf install webkit2gtk4.1-devel gtk3-devel glib2-devel   # Fedora, once
-cargo build
+./scripts/install-gui-debug.sh
 ```
 
 ## Run
 
 ```bash
-cargo run -p cosmic-scribe-gui              # History
-cargo run -p cosmic-scribe-gui -- --settings # Settings
+cosmic-scribe-gui-debug              # History
+cosmic-scribe-gui-debug --settings   # Settings
 ```
 
-Phase 1 loads the same Svelte UI via a local HTTP server inside the WebKit webview. Phase 2 will replace HTTP with Tauri `invoke()` commands.
+## Remove
+
+```bash
+./scripts/uninstall-gui-debug.sh
+```
+
+Phase 1 loads the Svelte UI via a local HTTP server in WebKit. Phase 2: Tauri `invoke()` + tray opens this instead of browser.

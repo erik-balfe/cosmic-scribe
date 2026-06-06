@@ -91,32 +91,32 @@
 <style>
   .combobox { position: relative; }
   .trigger {
-    width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #333;
-    background: #0f3460; color: #fff; font-size: 14px; cursor: pointer;
+    width: 100%; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--surface-raised); color: var(--text); font-size: 14px; cursor: pointer;
     display: flex; justify-content: space-between; align-items: center; text-align: left;
   }
-  .trigger:hover { border-color: #555; }
-  .trigger:focus { outline: none; border-color: #e94560; }
-  .arrow { color: #888; font-size: 10px; margin-left: 8px; }
+  .trigger:hover { border-color: var(--blue); }
+  .trigger:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .arrow { color: var(--text-dim); font-size: 10px; margin-left: 8px; }
   .dropdown {
     position: absolute; top: 100%; left: 0; right: 0; z-index: 100;
-    background: #16213e; border: 1px solid #333; border-radius: 8px; margin-top: 4px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: 4px;
+    box-shadow: var(--shadow);
   }
   .search {
-    width: 100%; padding: 10px 14px; border: none; border-bottom: 1px solid #2a2a4a;
-    background: #0f3460; color: #fff; font-size: 14px; border-radius: 8px 8px 0 0;
+    width: 100%; padding: 10px 14px; border: none; border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface-raised); color: var(--text); font-size: 14px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   }
   .search:focus { outline: none; }
   .list { max-height: 280px; overflow-y: auto; }
   .opt {
     display: flex; justify-content: space-between; align-items: center;
     width: 100%; padding: 8px 14px; border: none; background: none;
-    color: #ccc; font-size: 13px; cursor: pointer; text-align: left;
+    color: var(--text-muted); font-size: 13px; cursor: pointer; text-align: left;
   }
-  .opt:hover, .opt.active { background: #0f3460; }
-  .opt.selected { color: #fff; }
-  .opt.rec { color: #f0c040; }
-  .pricing { font-size: 11px; color: #666; margin-left: 12px; white-space: nowrap; }
-  .empty { padding: 16px; text-align: center; color: #666; font-size: 13px; }
+  .opt:hover, .opt.active { background: var(--surface-raised); }
+  .opt.selected { color: var(--text); }
+  .opt.rec { color: var(--warning); }
+  .pricing { font-size: 11px; color: var(--text-dim); margin-left: 12px; white-space: nowrap; }
+  .empty { padding: 16px; text-align: center; color: var(--text-dim); font-size: 13px; }
 </style>

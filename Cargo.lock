@@ -496,9 +496,11 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs 5.0.1",
+ "futures-util",
  "hkdf",
  "hound",
  "ksni",
+ "png 0.17.16",
  "rand 0.8.6",
  "reqwest 0.12.28",
  "rust-embed",
@@ -510,6 +512,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wiremock",
+ "zbus",
 ]
 
 [[package]]

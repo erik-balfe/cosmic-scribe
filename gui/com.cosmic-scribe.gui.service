@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=com.cosmic-scribe.gui
+Exec=cosmic-scribe-gui %U

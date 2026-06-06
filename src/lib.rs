@@ -15,10 +15,12 @@ pub mod ipc;
 pub mod keyring;
 pub mod lifecycle;
 pub mod logging;
+pub mod recording;
 pub mod state;
 pub mod stt;
 pub mod traits;
 pub mod tray;
+mod tray_theme;
 pub mod web;
 
 pub use state::{AppState, Command, Event};

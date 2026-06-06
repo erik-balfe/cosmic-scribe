@@ -39,8 +39,12 @@ pkill -f 'voice-input.*--daemon' 2>/dev/null || true
 
 rm -f "${HOME}/.local/bin/cosmic-scribe"
 rm -f "${HOME}/.local/bin/voice-input"
+rm -f "${HOME}/.local/bin/cosmic-scribe-gui-debug"
 rm -f "${HOME}/.local/share/cosmic-scribe/cosmic-scribe"
+rm -f "${HOME}/.local/share/cosmic-scribe/voice-input"
 rm -f "${HOME}/.local/share/voice-input/voice-input"
+rm -f "${HOME}/.local/share/cosmic-scribe/ui-browser.lock"
+rm -f "${HOME}/.local/share/cosmic-scribe/gui-debug.lock"
 rm -f "${HOME}/.config/autostart/cosmic-scribe.desktop"
 rm -f "${HOME}/.config/autostart/voice-input.desktop"
 rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/cosmic-scribe.sock"

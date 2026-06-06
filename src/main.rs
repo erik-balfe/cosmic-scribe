@@ -10,7 +10,6 @@ use cosmic_scribe::stt::XaiSttClient;
 use cosmic_scribe::traits::SttClient;
 use cosmic_scribe::traits::{KeyringStore, TrayController};
 use cosmic_scribe::tray;
-use cosmic_scribe::web;
 use cosmic_scribe::APP_SLUG;
 use ksni::TrayMethods;
 use std::sync::Arc;
@@ -104,20 +103,25 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if args.iter().any(|a| a == "--prune-junk-recordings") {
+        let dir = lifecycle::recordings_dir();
+        let n = cosmic_scribe::recording::prune_junk_recordings(&dir);
+        println!("Removed {n} junk recording(s) from {}", dir.display());
+        return Ok(());
+    }
+
     if args.iter().any(|a| a == "--autostart") {
         create_autostart()?;
         return Ok(());
     }
 
     if args.iter().any(|a| a == "--history") {
-        println!("Starting history UI...");
-        web::run_at("/")?;
+        lifecycle::spawn_gui(false)?;
         return Ok(());
     }
 
     if args.iter().any(|a| a == "--settings") {
-        println!("Starting settings UI...");
-        web::run_at("/settings")?;
+        lifecycle::spawn_gui(true)?;
         return Ok(());
     }
 
@@ -168,8 +172,8 @@ fn print_usage() {
     eprintln!();
     eprintln!("Setup:");
     eprintln!("  --configure          Interactive API key + language");
-    eprintln!("  --history            Web UI — recording history");
-    eprintln!("  --settings           Web UI — API key, language, output mode");
+    eprintln!("  --history            Tauri window — recording history");
+    eprintln!("  --settings           Tauri window — API key, language, output mode");
     eprintln!("  --autostart          Enable login autostart only");
     eprintln!("  --set-key KEY        Store xAI API key");
     eprintln!("  --clear-key          Remove stored API key");
@@ -259,6 +263,7 @@ async fn daemon_mode() -> anyhow::Result<()> {
 
     let voice_tray = tray::VoiceTray::new(tx.clone());
     let tray_handle = voice_tray.spawn().await?;
+    tokio::spawn(tray::watch_ui_theme(tray_handle.clone()));
 
     app.set_tray_controller(Box::new(TrayHandle::new(tray_handle)));
 

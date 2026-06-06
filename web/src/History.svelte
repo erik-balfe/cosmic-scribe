@@ -1,39 +1,65 @@
 <script>
   import { copyText } from './lib/toast.js';
+  import { formatDuration, recordingTimeLabels } from './lib/time.js';
+  import { mergeHistoryEntries } from './lib/history.js';
 
-  let { onselect } = $props();
+  let { onselect, live = false, timeMode = 'relative' } = $props();
   let entries = $state([]);
   let offset = $state(0);
   let hasMore = $state(true);
   let loading = $state(false);
+  let loadingMore = $state(false);
   let confirmingDelete = $state(null);
 
-  async function load() {
+  const POLL_MS = 2000;
+
+  async function fetchPage(pageOffset, limit = 20) {
+    const r = await fetch(`/api/history?offset=${pageOffset}&limit=${limit}`);
+    if (!r.ok) return [];
+    return r.json();
+  }
+
+  async function loadInitial() {
     loading = true;
-    const r = await fetch(`/api/history?offset=${offset}&limit=20`);
-    const data = await r.json();
+    const data = await fetchPage(0);
+    entries = data;
+    offset = data.length;
+    hasMore = data.length >= 20;
+    loading = false;
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    loadingMore = true;
+    const data = await fetchPage(offset);
     if (data.length < 20) hasMore = false;
     entries = [...entries, ...data];
     offset += data.length;
-    loading = false;
+    loadingMore = false;
   }
-  load();
 
-  function relativeTime(ts) {
-    if (!ts) return '';
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return ts;
-    const now = new Date();
-    const diff = now - d;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(diff / 3600000);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(diff / 86400000);
-    if (days < 7) return `${days}d ago`;
-    return d.toLocaleDateString();
+  async function refreshLatest() {
+    if (document.hidden) return;
+    const fresh = await fetchPage(0, Math.max(20, entries.length || 20));
+    if (!fresh.length && !entries.length) return;
+    entries = mergeHistoryEntries(entries, fresh);
+    if (offset < fresh.length) offset = fresh.length;
   }
+
+  loadInitial();
+
+  $effect(() => {
+    if (!live || typeof window === 'undefined') return;
+    const id = setInterval(refreshLatest, POLL_MS);
+    const onVisible = () => {
+      if (!document.hidden) refreshLatest();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  });
 
   function truncate(text, max = 120) {
     if (!text) return '';
@@ -51,20 +77,44 @@
 
 <div class="list">
   {#each entries as e, i (e.file)}
-    <div class="entry" onclick={() => onselect?.(e.file)} role="button" tabindex="0" onkeydown={(ev) => ev.key === 'Enter' && onselect?.(e.file)}>
-      <div class="meta-row">
-        <span class="time" title={e.ts}>{relativeTime(e.ts)}</span>
-        <span class="dur">{e.duration}</span>
-        <span class="grow"></span>
-        {#if e.has_text}
-          <button class="copy" onclick={(ev) => { ev.stopPropagation(); copyText(e.text); }} title="Copy transcript">Copy</button>
-        {/if}
-        {#if confirmingDelete === i}
-          <button class="del-yes" onclick={(ev) => { ev.stopPropagation(); deleteEntry(e.file, i); }}>Delete</button>
-          <button class="del-no" onclick={(ev) => { ev.stopPropagation(); confirmingDelete = null; }}>Keep</button>
-        {:else}
-          <button class="del" onclick={(ev) => { ev.stopPropagation(); confirmingDelete = i; }} title="Delete">&#x1F5D1;</button>
-        {/if}
+    {@const time = recordingTimeLabels(e.ts, timeMode)}
+    <div
+      class="entry"
+      onclick={() => onselect?.(e.file)}
+      role="button"
+      tabindex="0"
+      onkeydown={(ev) => ev.key === 'Enter' && onselect?.(e.file)}
+    >
+      <div class="recording-header entry-header">
+        <div class="recording-meta">
+          <span class="ts" title={time.tooltip}>{time.primary}</span>
+          <span class="dur">{formatDuration(e.duration)}</span>
+        </div>
+        <div
+          class="action-toolbar"
+          onclick={(ev) => ev.stopPropagation()}
+          onkeydown={(ev) => ev.stopPropagation()}
+          role="presentation"
+        >
+          <button
+            class="btn toolbar-slot"
+            disabled={!e.has_text}
+            onclick={() => copyText(e.text)}
+            title={e.has_text ? 'Copy transcript' : 'No transcript to copy'}
+          >Copy</button>
+          <div class="toolbar-confirm" class:is-confirming={confirmingDelete === i}>
+            <button
+              class="btn btn-danger toolbar-slot delete-primary"
+              onclick={() => confirmingDelete === i ? deleteEntry(e.file, i) : (confirmingDelete = i)}
+            >{confirmingDelete === i ? 'Confirm' : 'Delete'}</button>
+            <button
+              class="btn toolbar-slot cancel-slot"
+              tabindex={confirmingDelete === i ? 0 : -1}
+              aria-hidden={confirmingDelete !== i}
+              onclick={() => confirmingDelete = null}
+            >Cancel</button>
+          </div>
+        </div>
       </div>
       <div class="preview">
         {#if e.has_text}
@@ -75,48 +125,57 @@
       </div>
     </div>
   {/each}
+
   {#if hasMore}
-    <button class="more" onclick={load} disabled={loading}>
-      {loading ? 'Loading...' : 'Show more'}
+    <button class="btn more" onclick={loadMore} disabled={loadingMore}>
+      {loadingMore ? 'Loading…' : 'Show more'}
     </button>
   {/if}
-  {#if entries.length === 0}
+
+  {#if loading && entries.length === 0}
+    <div class="panel-loading">Loading recordings…</div>
+  {:else if entries.length === 0}
     <div class="empty">No recordings yet.</div>
   {/if}
 </div>
 
 <style>
-  .list { display: flex; flex-direction: column; gap: 8px; }
+  .list { display: flex; flex-direction: column; gap: 10px; }
   .entry {
-    background: #16213e; border-radius: 10px; border: 1px solid #2a2a4a;
-    padding: 14px 16px; cursor: pointer; transition: border-color 0.15s;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-subtle);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
-  .entry:hover { border-color: #e94560; }
-  .meta-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .time { font-size: 12px; color: #888; }
-  .dur { font-size: 11px; color: #666; }
-  .grow { flex: 1; }
-  .copy {
-    font-size: 12px; padding: 3px 10px; border-radius: 4px; border: 1px solid #333;
-    background: none; color: #aed6f1; cursor: pointer;
+  .entry:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-soft), 0 4px 16px rgba(0, 0, 0, 0.18);
   }
-  .copy:hover { border-color: #2471a3; color: #fff; }
-  .del, .del-yes, .del-no {
-    font-size: 12px; padding: 3px 10px; border-radius: 4px; border: 1px solid #333;
-    background: none; cursor: pointer; min-width: 52px; text-align: center;
+  .entry:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-color: var(--accent);
   }
-  .del { color: #888; font-size: 13px; padding: 2px 6px; min-width: auto; }
-  .del:hover { color: #e94560; border-color: #e94560; }
-  .del-yes { color: #e94560; border-color: #e94560; }
-  .del-no { color: #888; }
-  .preview { font-size: 13px; color: #aaa; line-height: 1.4; }
-  .no-text { color: #e94560; font-style: italic; }
+  .entry-header {
+    margin-bottom: 8px;
+  }
+  .preview {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.45;
+    min-height: 1.45em;
+  }
+  .no-text { color: var(--accent); font-style: italic; }
   .more {
-    background: #0f3460; color: #aed6f1; border: 1px solid #1a5276;
-    padding: 10px; border-radius: 8px; cursor: pointer; font-size: 14px;
-    text-align: center; margin-top: 8px;
+    width: 100%;
+    padding: 12px;
+    margin-top: 4px;
+    color: var(--blue);
+    background: var(--surface);
+    min-height: 44px;
   }
-  .more:hover { background: #1a5276; }
   .more:disabled { opacity: 0.5; cursor: default; }
-  .empty { text-align: center; color: #666; padding: 40px; }
+  .empty { text-align: center; color: var(--text-dim); padding: 48px 20px; }
 </style>

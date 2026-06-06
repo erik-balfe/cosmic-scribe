@@ -253,9 +253,17 @@ impl App {
                     self.awaiting_audio = false;
                     self.last_recording_path = Some(save_recording(&data, self.last_duration_ms));
 
+                    let drop_orphan = |path: &Option<std::path::PathBuf>| {
+                        if let Some(p) = path {
+                            crate::recording::remove_recording_files(p);
+                        }
+                    };
+
                     match self.keyring.get_api_key() {
                         Err(e) => {
                             self.log.stt_error(&format!("missing API key: {e}"));
+                            drop_orphan(&self.last_recording_path);
+                            self.last_recording_path = None;
                             self.event_tx
                                 .send(Event::Error("API key not configured".into()))
                                 .ok();
@@ -263,6 +271,8 @@ impl App {
                         }
                         Ok(key) if key.is_empty() => {
                             self.log.stt_error("API key is empty");
+                            drop_orphan(&self.last_recording_path);
+                            self.last_recording_path = None;
                             self.event_tx
                                 .send(Event::Error("API key not configured".into()))
                                 .ok();
@@ -347,6 +357,9 @@ impl App {
                             return;
                         }
                         if last_err == "empty transcript from STT" {
+                            if let Some(ref p) = path {
+                                crate::recording::remove_recording_files(p);
+                            }
                             let _ = tx.send(Event::Error("no speech detected".into()));
                         } else if !last_err.is_empty() {
                             let msg = format!(
@@ -403,13 +416,15 @@ impl App {
                 }
 
                 OpenHistory => {
-                    let exe = std::env::current_exe().unwrap_or_else(|_| crate::APP_SLUG.into());
-                    let _ = std::process::Command::new(exe).arg("--history").spawn();
+                    if let Err(e) = crate::lifecycle::spawn_gui(false) {
+                        tracing::warn!("failed to open history GUI: {e}");
+                    }
                 }
 
                 OpenSettings => {
-                    let exe = std::env::current_exe().unwrap_or_else(|_| crate::APP_SLUG.into());
-                    let _ = std::process::Command::new(exe).arg("--settings").spawn();
+                    if let Err(e) = crate::lifecycle::spawn_gui(true) {
+                        tracing::warn!("failed to open settings GUI: {e}");
+                    }
                 }
 
                 Quit => return,
@@ -536,6 +551,7 @@ mod tests {
     }
 
     fn make_app() -> App {
+        crate::lifecycle::init_test_recordings_dir();
         App::new(
             Box::new(MockCapture::with_duration(2000)),
             Arc::new(MockStt("hello world")),
@@ -547,6 +563,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_toggle_without_api_key_stays_idle() {
+        crate::lifecycle::init_test_recordings_dir();
         let mut app = App::new(
             Box::new(MockCapture::with_duration(2000)),
             Arc::new(MockStt("hello world")),
@@ -603,6 +620,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recording_error() {
+        crate::lifecycle::init_test_recordings_dir();
         let mut app = App::new(
             Box::new(MockCapture::failing()),
             Arc::new(MockStt("hello world")),
@@ -621,6 +639,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_recording_too_short_audio() {
+        crate::lifecycle::init_test_recordings_dir();
         // Capture with < 500ms duration — should be rejected
         let short_capture = MockCapture::with_duration(100);
         let mut app = App::new(
@@ -650,6 +669,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stt_timeout() {
+        crate::lifecycle::init_test_recordings_dir();
         std::env::set_var("VOICE_INPUT_STT_TIMEOUT_MS", "1000");
         std::env::set_var("VOICE_INPUT_STT_RETRIES", "0");
         let mut app = App::new(
@@ -679,6 +699,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_api_key() {
+        crate::lifecycle::init_test_recordings_dir();
         let mut app = App::new(
             Box::new(MockCapture::with_duration(2000)),
             Arc::new(MockStt("hello world")),
@@ -703,6 +724,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_audio_handled() {
+        crate::lifecycle::init_test_recordings_dir();
         let empty_capture = MockCapture::with_duration(0);
         let mut app = App::new(
             Box::new(empty_capture),
