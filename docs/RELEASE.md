@@ -1,6 +1,8 @@
 # OSS release readiness
 
-Last reviewed: 2026-06-05
+Last reviewed: 2026-06-06
+
+**Docs:** [README.md](README.md) · [BACKLOG.md](BACKLOG.md)
 
 ## Stable (ship as 0.1.0)
 
@@ -10,7 +12,7 @@ Last reviewed: 2026-06-05
 | Daemon + IPC | OK | Unix socket toggle |
 | Tray (SNI) | OK | Idle / red dot recording / gray processing; cancel; History, Settings, Quit |
 | API key storage | OK | AES-256-GCM, env override |
-| Recording history | OK | `.raw`, `.txt`, `.stt.json` (timestamps), `.json` (edits) under `~/.local/share/voice-input/recordings/` |
+| Recording history | OK | `.raw`, `.txt`, `.stt.json` (timestamps), `.json` (edits) under `~/.local/share/cosmic-scribe/recordings/` |
 | Web UI — list/detail | OK | Waveform, playback, edit versions, delete |
 | Tests | OK | 44 unit tests, recordings API regression |
 | License | OK | MIT |

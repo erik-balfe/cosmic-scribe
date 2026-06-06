@@ -5,17 +5,19 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::APP_SLUG;
+
+const LEGACY_SLUG: &str = "voice-input";
+
 pub fn share_binary() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("voice-input")
-        .join("voice-input")
+    data_dir().join(APP_SLUG)
 }
 
 pub fn wrapper_binary() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join(".local/bin/voice-input")
+        .join(".local/bin")
+        .join(APP_SLUG)
 }
 
 /// Binary used to spawn the daemon (wrapper → share copy).
@@ -28,7 +30,80 @@ pub fn daemon_binary() -> PathBuf {
     }
 }
 
+pub fn data_dir() -> PathBuf {
+    migrate_legacy_data_dir();
+    let dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(APP_SLUG);
+    std::fs::create_dir_all(&dir).ok();
+    dir
+}
+
+pub fn recordings_dir() -> PathBuf {
+    let dir = data_dir().join("recordings");
+    std::fs::create_dir_all(&dir).ok();
+    dir
+}
+
+fn legacy_data_dir() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(LEGACY_SLUG)
+}
+
+fn migrate_legacy_data_dir() {
+    let old = legacy_data_dir();
+    let new = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(APP_SLUG);
+    if old.exists() && !new.exists() && std::fs::rename(&old, &new).is_ok() {
+        tracing::info!(
+            "migrated data directory from {} to {}",
+            old.display(),
+            new.display()
+        );
+    }
+}
+
+fn legacy_wrapper_binary() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".local/bin")
+        .join(LEGACY_SLUG)
+}
+
+fn legacy_share_binary() -> PathBuf {
+    legacy_data_dir().join(LEGACY_SLUG)
+}
+
+fn legacy_autostart_desktop_file() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("autostart")
+        .join(format!("{LEGACY_SLUG}.desktop"))
+}
+
+fn legacy_socket_path() -> PathBuf {
+    dirs::runtime_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(format!("{LEGACY_SLUG}.sock"))
+}
+
+pub fn remove_legacy_install_artifacts() {
+    for path in [
+        legacy_wrapper_binary(),
+        legacy_share_binary(),
+        legacy_autostart_desktop_file(),
+        legacy_socket_path(),
+    ] {
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 pub fn install_binary_from(source: &Path) -> anyhow::Result<PathBuf> {
+    migrate_legacy_data_dir();
     let dest = share_binary();
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
@@ -51,6 +126,7 @@ pub fn install_binary_from(source: &Path) -> anyhow::Result<PathBuf> {
         std::fs::remove_file(&wrapper)?;
     }
     std::os::unix::fs::symlink(&dest, &wrapper)?;
+    remove_legacy_install_artifacts();
     eprintln!("Installed: {} (from {})", dest.display(), source.display());
     eprintln!("Command: {}", wrapper.display());
     Ok(dest)
@@ -80,7 +156,7 @@ fn replace_executable(dest: &Path, tmp: &Path) -> anyhow::Result<()> {
         }
     }
     anyhow::bail!(
-        "Could not install to {} (file busy). Run: voice-input --stop, wait a second, then --install again",
+        "Could not install to {} (file busy). Run: {APP_SLUG} --stop, wait a second, then --install again",
         dest.display()
     )
 }
@@ -121,7 +197,7 @@ fn resolve_binary_source(args: &[String], flag_prefix: &str) -> anyhow::Result<P
     if looks_like_debug_build(&current) {
         eprintln!(
             "warning: installing a debug build — for production run:\n  \
-             cargo build --release && ./target/release/voice-input --install"
+             cargo build --release && ./target/release/{APP_SLUG} --install"
         );
     }
 
@@ -133,18 +209,28 @@ fn sibling_release_path(current: &Path) -> Option<PathBuf> {
     if parent.file_name()?.to_str()? != "debug" {
         return None;
     }
-    Some(parent.parent()?.join("release").join("voice-input"))
+    Some(parent.parent()?.join("release").join(APP_SLUG))
 }
 
 fn sibling_release_binary(current: &Path) -> Option<PathBuf> {
     let release = sibling_release_path(current)?;
-    release.is_file().then_some(release)
+    if release.is_file() {
+        return Some(release);
+    }
+    let debug_parent = current.parent()?;
+    let legacy = debug_parent.parent()?.join("release").join(LEGACY_SLUG);
+    legacy.is_file().then_some(legacy)
 }
 
 fn cargo_binary() -> Option<PathBuf> {
-    dirs::home_dir()
-        .map(|h| h.join(".cargo/bin/voice-input"))
-        .filter(|p| p.is_file())
+    let home = dirs::home_dir()?;
+    for name in [APP_SLUG, LEGACY_SLUG] {
+        let p = home.join(".cargo/bin").join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 fn looks_like_debug_build(path: &Path) -> bool {
@@ -157,8 +243,13 @@ fn brew_binary() -> Option<PathBuf> {
         return None;
     }
     let prefix = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let p = PathBuf::from(prefix).join("bin/voice-input");
-    p.is_file().then_some(p)
+    for name in [APP_SLUG, LEGACY_SLUG] {
+        let p = PathBuf::from(&prefix).join("bin").join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 fn file_is_newer(a: &Path, b: &Path) -> bool {
@@ -172,18 +263,25 @@ fn file_is_newer(a: &Path, b: &Path) -> bool {
 }
 
 pub fn daemon_pids() -> Vec<i32> {
-    let Ok(output) = Command::new("pgrep")
-        .args(["-f", "voice-input.*--daemon"])
-        .output()
-    else {
-        return vec![];
-    };
-    let self_pid = std::process::id() as i32;
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|s| s.trim().parse::<i32>().ok())
-        .filter(|&p| p != self_pid)
-        .collect()
+    let mut pids = Vec::new();
+    for pattern in [
+        format!("{APP_SLUG}.*--daemon"),
+        format!("{LEGACY_SLUG}.*--daemon"),
+    ] {
+        let Ok(output) = Command::new("pgrep").args(["-f", &pattern]).output() else {
+            continue;
+        };
+        let self_pid = std::process::id() as i32;
+        pids.extend(
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|s| s.trim().parse::<i32>().ok())
+                .filter(|&p| p != self_pid),
+        );
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    pids
 }
 
 pub fn is_daemon_running() -> bool {
@@ -205,7 +303,7 @@ pub fn stop_daemon() -> u32 {
         }
     }
     for pid in daemon_pids() {
-        let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
     }
     for _ in 0..10 {
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -215,22 +313,23 @@ pub fn stop_daemon() -> u32 {
     }
     let sock = crate::ipc::socket_path();
     let _ = std::fs::remove_file(&sock);
+    let _ = std::fs::remove_file(legacy_socket_path());
     let n = pids.len() as u32;
     eprintln!("Stopped {n} daemon process(es)");
     n
 }
 
 pub fn start_daemon() -> anyhow::Result<()> {
-    if is_daemon_running() {
-        eprintln!("Daemon already running");
-        return Ok(());
-    }
     let bin = daemon_binary();
     if !bin.exists() {
         anyhow::bail!(
-            "No installed binary at {}. Run: voice-input --install",
+            "No installed binary at {}. Run: {APP_SLUG} --install",
             bin.display()
         );
+    }
+    if is_daemon_running() {
+        eprintln!("Daemon already running");
+        return Ok(());
     }
     Command::new(&bin)
         .arg("--daemon")
@@ -243,39 +342,25 @@ pub fn start_daemon() -> anyhow::Result<()> {
 }
 
 pub fn print_status() {
-    let pids = daemon_pids();
-    let share = share_binary();
-    let wrapper = wrapper_binary();
     eprintln!("Cosmic Scribe status");
     eprintln!(
         "  daemon: {}",
-        if pids.is_empty() {
-            "stopped"
-        } else {
+        if is_daemon_running() {
             "running"
+        } else {
+            "stopped"
         }
     );
-    if !pids.is_empty() {
-        eprintln!(
-            "  pids: {}",
-            pids.iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-    if share.exists() {
-        if let Ok(m) = share.metadata() {
-            if let Ok(t) = m.modified() {
-                eprintln!("  installed: {} (modified {:?})", share.display(), t);
-            }
-        }
-    } else {
-        eprintln!("  installed: (none — run --install)");
-    }
+    let share = share_binary();
+    eprintln!(
+        "  installed binary: {} ({})",
+        share.display(),
+        if share.exists() { "present" } else { "absent" }
+    );
+    let wrapper = wrapper_binary();
     if wrapper.exists() {
         eprintln!(
-            "  command: {} → {:?}",
+            "  wrapper: {} → {:?}",
             wrapper.display(),
             std::fs::read_link(&wrapper).ok()
         );
@@ -305,18 +390,12 @@ pub fn autostart_desktop_file() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("autostart")
-        .join("voice-input.desktop")
-}
-
-pub fn data_dir() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("voice-input")
+        .join(format!("{APP_SLUG}.desktop"))
 }
 
 /// Remove daemon install (wrapper, share copy, autostart, IPC socket).
 /// Does not remove the binary you are running from (e.g. Homebrew cellar).
-/// Use `--purge` to delete `~/.local/share/voice-input/` (keys, recordings, settings).
+/// Use `--purge` to delete `~/.local/share/cosmic-scribe/` (keys, recordings, settings).
 pub fn uninstall(purge: bool) -> anyhow::Result<()> {
     stop_daemon();
 
@@ -363,11 +442,14 @@ pub fn uninstall(purge: bool) -> anyhow::Result<()> {
         eprintln!("Removed: {}", sock.display());
     }
 
+    remove_legacy_install_artifacts();
+
     if purge {
-        let dir = data_dir();
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir)?;
-            eprintln!("Removed data directory: {}", dir.display());
+        for dir in [data_dir(), legacy_data_dir()] {
+            if dir.exists() {
+                std::fs::remove_dir_all(&dir)?;
+                eprintln!("Removed data directory: {}", dir.display());
+            }
         }
     } else {
         eprintln!(
@@ -377,9 +459,11 @@ pub fn uninstall(purge: bool) -> anyhow::Result<()> {
     }
 
     eprintln!();
-    eprintln!("If your shell still says 'voice-input: No such file or directory', run: hash -r");
-    eprintln!("Homebrew package (if any) is separate: brew uninstall voice-input");
-    eprintln!("Then install again: voice-input --install  (or $(brew --prefix)/bin/voice-input --install)");
+    eprintln!("If your shell still says '{APP_SLUG}: No such file or directory', run: hash -r");
+    eprintln!("Homebrew package (if any) is separate: brew uninstall {APP_SLUG}");
+    eprintln!(
+        "Then install again: {APP_SLUG} --install  (or $(brew --prefix)/bin/{APP_SLUG} --install)"
+    );
 
     Ok(())
 }
@@ -391,23 +475,26 @@ mod tests {
     #[test]
     fn share_and_wrapper_paths_under_home() {
         let path = share_binary();
-        assert!(path.to_string_lossy().contains("voice-input"));
+        assert!(path.to_string_lossy().contains(APP_SLUG));
     }
 
     #[test]
     fn sibling_release_from_debug_path() {
-        let debug = PathBuf::from("/proj/target/debug/voice-input");
+        let debug = PathBuf::from(format!("/proj/target/debug/{APP_SLUG}"));
         let release = sibling_release_path(&debug).unwrap();
-        assert_eq!(release, PathBuf::from("/proj/target/release/voice-input"));
+        assert_eq!(
+            release,
+            PathBuf::from(format!("/proj/target/release/{APP_SLUG}"))
+        );
     }
 
     #[test]
     fn looks_like_debug_detects_target_debug() {
-        assert!(looks_like_debug_build(&PathBuf::from(
-            "/home/u/proj/target/debug/voice-input"
-        )));
-        assert!(!looks_like_debug_build(&PathBuf::from(
-            "/home/u/proj/target/release/voice-input"
-        )));
+        assert!(looks_like_debug_build(&PathBuf::from(format!(
+            "/home/u/proj/target/debug/{APP_SLUG}"
+        ))));
+        assert!(!looks_like_debug_build(&PathBuf::from(format!(
+            "/home/u/proj/target/release/{APP_SLUG}"
+        ))));
     }
 }

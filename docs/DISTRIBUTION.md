@@ -10,17 +10,17 @@
 2. README hero / screenshots (tray icon + history detail)
 3. User-focused README (done in initial public push)
 
-**Repo hygiene:** README.md is now the user landing page. `docs/STATE.md` is maintainer truth. `CONTRIBUTING.md` for devs. This file is for packaging notes.
+**Repo hygiene:** [README.md](../README.md) is the user landing page. [docs/README.md](README.md) indexes all docs. [docs/STATE.md](STATE.md) is maintainer truth. [CONTRIBUTING.md](../CONTRIBUTING.md) for devs. This file is for packaging notes.
 
 ## Homebrew / brew tap (Linux)
 
-Formula: `Formula/voice-input.rb` in this repo (self-tap).
+Formula: `Formula/cosmic-scribe.rb` in this repo (self-tap).
 
 ```bash
 brew tap erik-balfe/cosmic-scribe https://github.com/erik-balfe/cosmic-scribe
-brew install voice-input
-voice-input --install
-voice-input --configure
+brew install cosmic-scribe
+cosmic-scribe --install
+cosmic-scribe --configure
 ```
 
 On each `v*` tag, [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs `scripts/update-formula.sh` to pin `url` + `sha256` on `master` and creates a GitHub Release.
@@ -34,7 +34,7 @@ Test locally (tap clones git — commit first):
 
 ```bash
 brew tap erik-balfe/cosmic-scribe file:///path/to/cosmic-scribe
-brew install voice-input
+brew install cosmic-scribe
 ```
 
 ## macOS (future, not a priority)
@@ -51,8 +51,8 @@ See the main [README.md](../README.md) for the user-friendly quick start.
 
 ```bash
 cargo install --path . --locked
-voice-input --install
-voice-input --configure
+cosmic-scribe --install
+cosmic-scribe --configure
 ```
 
 ### 2. Homebrew tap (available)

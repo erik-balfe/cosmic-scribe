@@ -1,4 +1,4 @@
-class VoiceInput < Formula
+class CosmicScribe < Formula
   desc "Cosmic Scribe — voice dictation for COSMIC desktop (Wayland)"
   homepage "https://github.com/erik-balfe/cosmic-scribe"
   license "MIT"
@@ -20,27 +20,27 @@ class VoiceInput < Formula
           sudo dnf install alsa-utils wl-clipboard wtype libnotify
 
         First-time setup:
-          voice-input --install
-          voice-input --configure
+          cosmic-scribe --install
+          cosmic-scribe --configure
 
         Update later:
-          brew upgrade voice-input
-          "$(brew --prefix)/bin/voice-input" --update
+          brew upgrade cosmic-scribe
+          "$(brew --prefix)/bin/cosmic-scribe" --update
 
         Uninstall user install + tray:
-          "$(brew --prefix)/bin/voice-input" --uninstall
+          "$(brew --prefix)/bin/cosmic-scribe" --uninstall
         Remove Homebrew package:
-          brew uninstall voice-input
+          brew uninstall cosmic-scribe
 
         Service: --start | --stop | --restart | --status
 
-        Bind a global shortcut to: voice-input --trigger
+        Bind a global shortcut to: cosmic-scribe --trigger
         Tray: mic icon → solid red dot while recording.
       EOS
     end
   end
 
   test do
-    assert_match "voice-input", shell_output("#{bin}/voice-input 2>&1", 0)
+    assert_match "cosmic-scribe", shell_output("#{bin}/cosmic-scribe 2>&1", 0)
   end
 end

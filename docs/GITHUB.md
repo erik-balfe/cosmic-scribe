@@ -1,13 +1,13 @@
 # GitHub
 
-**Primary repo:** https://github.com/erik-balfe/cosmic-scribe (private)
+**Primary repo:** https://github.com/erik-balfe/cosmic-scribe (public)
 
 **Legacy repo:** https://github.com/erik-balfe/voice-input — superseded by `cosmic-scribe`; kept until migration is confirmed.
 
 ## Remotes (jj)
 
 ```bash
-cd /path/to/cosmic-scribe   # local dir may still be named voice-input
+cd /path/to/cosmic-scribe
 jj git remote list
 # origin  → git@github.com:erik-balfe/cosmic-scribe.git
 # voice-input → git@github.com:erik-balfe/voice-input.git  (optional, legacy)

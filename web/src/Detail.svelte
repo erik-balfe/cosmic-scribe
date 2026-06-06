@@ -16,6 +16,8 @@
   let audioTime = $state(0);
   let audioDur = $state(0);
   let showDelete = $state(false);
+  let transcribing = $state(false);
+  let needsTranscript = $derived(!editText?.trim());
 
   async function load() {
     const r = await fetch(`/api/recording/${detailId}`);
@@ -114,6 +116,24 @@
     fetch(`/api/recording/${detailId}/delete`, { method: 'POST' }).then(() => onback?.());
   }
 
+  async function transcribeRecording() {
+    transcribing = true;
+    errMsg = '';
+    try {
+      const r = await fetch(`/api/recording/${detailId}/transcribe`, { method: 'POST' });
+      const body = await r.json();
+      if (r.ok && body.ok) {
+        await load();
+        switchVersion(0);
+      } else {
+        errMsg = body.error || 'Transcription failed';
+      }
+    } catch {
+      errMsg = 'Network error';
+    }
+    transcribing = false;
+  }
+
   function toggleAudio() {
     if (!audio) {
       const a = new Audio(`/api/recording/${detailId}/audio`);
@@ -164,6 +184,15 @@
 
   {#if audioDur > 0}
     <div class="time-display">{formatTime(audioTime)} / {formatTime(audioDur)}</div>
+  {/if}
+
+  {#if needsTranscript}
+    <div class="no-transcript">
+      <p>Audio saved — no transcript yet. Listen above, then transcribe when you're back online.</p>
+      <button class="transcribe-btn" onclick={transcribeRecording} disabled={transcribing}>
+        {transcribing ? 'Transcribing…' : 'Transcribe'}
+      </button>
+    </div>
   {/if}
 
   {#if data.waveform?.length}
@@ -286,6 +315,18 @@
     color: #f4a261; background: rgba(244, 162, 97, 0.2); padding: 1px 5px; border-radius: 3px;
     margin-left: 4px; vertical-align: middle;
   }
+
+  .no-transcript {
+    background: #1a2a4a; border: 1px solid #334;
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
+  }
+  .no-transcript p { margin: 0 0 10px; font-size: 13px; color: #aaa; line-height: 1.5; }
+  .transcribe-btn {
+    background: #1a5276; border: 1px solid #2471a3; color: #aed6f1;
+    border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 13px;
+  }
+  .transcribe-btn:hover:not(:disabled) { background: #2471a3; color: #fff; }
+  .transcribe-btn:disabled { opacity: 0.5; cursor: wait; }
 
   .hint { font-size: 12px; color: #666; margin-bottom: 8px; }
   .error-msg { font-size: 13px; color: #e94560; background: #3d1a1a; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; }

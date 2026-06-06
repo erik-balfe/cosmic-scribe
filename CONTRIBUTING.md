@@ -8,11 +8,11 @@ Thank you for your interest! This project is a personal daily driver that I'm op
 
 ```bash
 git clone https://github.com/erik-balfe/cosmic-scribe.git
-cd voice-input
+cd cosmic-scribe
 cargo build --release
 ```
 
-The binary is at `target/release/voice-input`.
+The binary is at `target/release/cosmic-scribe`.
 
 ## Quality checks
 
@@ -34,8 +34,8 @@ cd web && npm ci && npm run lint && npm run build
 ### Install for local testing
 
 ```bash
-./target/release/voice-input --install
-./target/release/voice-input --configure
+./target/release/cosmic-scribe --install
+./target/release/cosmic-scribe --configure
 ```
 
 This puts the binary in `~/.local/bin` and sets up autostart.
@@ -43,19 +43,19 @@ This puts the binary in `~/.local/bin` and sets up autostart.
 Run the daemon directly for development:
 
 ```bash
-./target/release/voice-input --daemon
+./target/release/cosmic-scribe --daemon
 ```
 
 Trigger recording:
 
 ```bash
-./target/release/voice-input --trigger
+./target/release/cosmic-scribe --trigger
 ```
 
 Or one-shot:
 
 ```bash
-./target/release/voice-input --record-once
+./target/release/cosmic-scribe --record-once
 ```
 
 ### Web UI (embedded Svelte)
@@ -107,7 +107,20 @@ Key design goals:
 - Single binary, no external services at runtime besides the STT API.
 - Low resource use on Linux laptops.
 
-See also `docs/STATE.md` for current status of components.
+See also [docs/README.md](docs/README.md) (doc index), [docs/STATE.md](docs/STATE.md), and [docs/BACKLOG.md](docs/BACKLOG.md).
+
+### Tauri GUI spike (`gui/`)
+
+Native window prototype (replaces browser for History/Settings):
+
+```bash
+cd web && npm run build
+cd ../gui && cargo build
+cargo run -p cosmic-scribe-gui              # History
+cargo run -p cosmic-scribe-gui -- --settings # Settings
+```
+
+Fedora: `sudo dnf install webkit2gtk4.1-devel`. See [docs/TAURI.md](docs/TAURI.md).
 
 ## Using jj (Jujutsu)
 

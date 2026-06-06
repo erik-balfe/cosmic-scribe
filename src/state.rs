@@ -44,6 +44,7 @@ pub enum Command {
     SetTrayState(String),
     ShowNotification { title: String, body: String },
     OpenHistory,
+    OpenSettings,
     Quit,
 }
 

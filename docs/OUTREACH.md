@@ -1,6 +1,6 @@
 # Outreach — Cosmic Scribe on COSMIC desktop
 
-Product name: **Cosmic Scribe** (repo/binary rename to `cosmic-scribe` planned).
+Product name: **Cosmic Scribe** (repo and binary: `cosmic-scribe`).
 
 ## Where COSMIC users discover apps
 
@@ -26,4 +26,4 @@ There is no single “COSMIC app registry” like GNOME Circle. Practical path: 
 
 - [ ] Repo public, one clean commit, screenshots in README
 - [ ] Short screen recording (tray → speak → text)
-- [ ] Rename crate/binary to `cosmic-scribe` (optional but clearer)
+- [x] Rename crate/binary to `cosmic-scribe`

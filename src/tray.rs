@@ -217,8 +217,8 @@ impl Tray for VoiceTray {
             enabled: true,
             icon_name: "document-open-recent".into(),
             activate: Box::new(|_: &mut Self| {
-                let exe = std::env::current_exe().unwrap_or_else(|_| "voice-input".into());
-                let _ = std::process::Command::new(exe).arg("--settings").spawn();
+                let exe = std::env::current_exe().unwrap_or_else(|_| crate::APP_SLUG.into());
+                let _ = std::process::Command::new(exe).arg("--history").spawn();
             }),
             ..Default::default()
         }));
@@ -227,7 +227,7 @@ impl Tray for VoiceTray {
             enabled: true,
             icon_name: "preferences-system".into(),
             activate: Box::new(|_: &mut Self| {
-                let exe = std::env::current_exe().unwrap_or_else(|_| "voice-input".into());
+                let exe = std::env::current_exe().unwrap_or_else(|_| crate::APP_SLUG.into());
                 let _ = std::process::Command::new(exe).arg("--settings").spawn();
             }),
             ..Default::default()

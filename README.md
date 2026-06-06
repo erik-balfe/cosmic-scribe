@@ -10,10 +10,10 @@ Linux users on **COSMIC** who want reliable **speech-to-text on Wayland** with a
 
 ### Dictation and recognition
 
-- **Global shortcut** — bind `voice-input --trigger` in COSMIC keyboard settings; press to start/stop recording.
+- **Global shortcut** — bind `cosmic-scribe --trigger` in COSMIC keyboard settings; press to start/stop recording. **Step-by-step:** [docs/SHORTCUT.md](docs/SHORTCUT.md).
 - **Tray mic** — left-click to record when idle; icon shows **white mic → red dot (recording) → gray mic (transcribing)**.
 - **Cloud STT** — after you stop, audio is sent to xAI; the transcript is what you get for pasting or review.
-- **Language** — default **en**; set any code xAI accepts (Settings or `voice-input --configure` / `--set-lang`).
+- **Language** — default **en**; set any code xAI accepts (Settings or `cosmic-scribe --configure` / `--set-lang`).
 
 ### Text output (clipboard is always updated)
 
@@ -24,7 +24,7 @@ Every successful transcription is **copied to the clipboard**. On top of that:
 | **wtype** (default) | Clipboard + simulated typing into the focused field (`wtype`, no per-key delay). Best for editors and browsers. |
 | **clipboard** | Clipboard only + notification; you paste yourself (good for **terminals**). |
 
-Change mode in **Settings** (tray → Settings).
+Change mode in **Settings** (tray → Settings). Details: [docs/OUTPUT.md](docs/OUTPUT.md).
 
 ### Cancel mistakes
 
@@ -40,11 +40,12 @@ Change mode in **Settings** (tray → Settings).
 | **Settings** | Web UI — API key, language, output mode |
 | **Quit** | Stops the daemon |
 
-**History** keeps local files under `~/.local/share/voice-input/recordings/` (audio `.raw`, transcript `.txt`, optional word timings `.stt.json`). Use it to:
+**History** keeps local files under `~/.local/share/cosmic-scribe/recordings/` (audio `.raw`, transcript `.txt`, optional word timings `.stt.json`). Use it to:
 
 - **Copy** an older transcript if you started a new recording and did not paste the previous one
 - **Listen** and check whether recognition was correct
 - **Edit** text and keep versions
+- **Transcribe** recordings that failed earlier (no internet, missing API key, etc.)
 
 **Settings** also offers experimental OpenRouter “AI correction” (beta; often unreliable).
 
@@ -52,12 +53,12 @@ Change mode in **Settings** (tray → Settings).
 
 | Command | Purpose |
 |---------|---------|
-| `voice-input --install` | Install daemon binary, autostart, start tray |
-| `voice-input --update` | Replace installed binary and restart |
-| `voice-input --status` | Daemon running? paths? |
-| `voice-input --stop` | Stop daemon |
-| `voice-input --uninstall` | Remove user install (keep data) |
-| `voice-input --uninstall --purge` | Remove user install and all local data |
+| `cosmic-scribe --install` | Install daemon binary, autostart, start tray |
+| `cosmic-scribe --update` | Replace installed binary and restart |
+| `cosmic-scribe --status` | Daemon running? paths? |
+| `cosmic-scribe --stop` | Stop daemon |
+| `cosmic-scribe --uninstall` | Remove user install (keep data) |
+| `cosmic-scribe --uninstall --purge` | Remove user install and all local data |
 
 ## Screenshots
 
@@ -65,50 +66,106 @@ Change mode in **Settings** (tray → Settings).
 |:---:|:---:|:---:|
 | ![Idle](screenshots/tray-idle.png) | ![Recording](screenshots/tray-recording.png) | ![Processing](screenshots/tray-processing.png) |
 
-## Quick start
+## Quick start (recommended)
 
-**Dependencies (Fedora):**
+End-to-end setup on Fedora/COSMIC: **install → API key → global shortcut → test**.
+
+### 1. System dependencies
 
 ```bash
 sudo dnf install alsa-utils wl-clipboard wtype libnotify
 ```
 
-**From source:**
-
-```bash
-git clone https://github.com/erik-balfe/cosmic-scribe.git
-cd cosmic-scribe   # clone directory name may vary
-cargo build --release
-./target/release/voice-input --install
-./target/release/voice-input --configure
-```
-
-**Homebrew (Linux):**
+### 2. Install via Homebrew (Linux)
 
 ```bash
 brew tap erik-balfe/cosmic-scribe https://github.com/erik-balfe/cosmic-scribe
-brew install erik-balfe/cosmic-scribe/voice-input
-$(brew --prefix)/bin/voice-input --install
-$(brew --prefix)/bin/voice-input --configure
+brew install erik-balfe/cosmic-scribe/cosmic-scribe
 ```
 
-If `voice-input` fails after removing an old `~/.local/bin` install, run `hash -r` or use `$(brew --prefix)/bin/voice-input`.
+### 3. Install the tray daemon
 
-**Shortcut** — COSMIC **Settings → Keyboard → Custom shortcuts**:
+Homebrew puts the binary in your brew prefix; `--install` adds `~/.local/bin/cosmic-scribe`, autostart, and starts the daemon:
 
-```text
-voice-input --trigger
+```bash
+$(brew --prefix)/bin/cosmic-scribe --install
+cosmic-scribe --status    # daemon: running
 ```
+
+You should see the **mic tray icon** in the panel.
+
+### 4. Configure your xAI API key
+
+Get a key from [console.x.ai](https://console.x.ai/), then:
+
+```bash
+cosmic-scribe --configure
+```
+
+Or tray → **Settings** → paste API key → Save.
+
+Recording is blocked until a key is set (you’ll get a notification and Settings will open if you try without one).
+
+### 5. Set your global shortcut (important)
+
+This is the main way to dictate. Cosmic Scribe does **not** pick a key for you — you bind one in COSMIC:
+
+1. **Settings → Keyboard → Custom shortcuts** (or **Custom commands**).
+2. **Add** a new shortcut.
+3. **Name:** `Cosmic Scribe`
+4. **Command:** use the full path (most reliable):
+
+   ```bash
+   # copy yours:
+   readlink -f "$(which cosmic-scribe)"
+   ```
+
+   Example command field:
+
+   ```text
+   /home/you/.local/bin/cosmic-scribe --trigger
+   ```
+
+5. Assign a key combo you like (e.g. **Super+Shift+Space**).
+6. Save.
+
+**Full guide with troubleshooting:** [docs/SHORTCUT.md](docs/SHORTCUT.md)
+
+### 6. Test dictation
+
+1. Open any app with a text field.
+2. Press your shortcut → tray shows **red dot** → speak → press shortcut again.
+3. Text should appear in the field (or on the clipboard if you use clipboard mode).
+
+### From source (developers)
+
+```bash
+git clone https://github.com/erik-balfe/cosmic-scribe.git
+cd cosmic-scribe
+cargo build --release
+./target/release/cosmic-scribe --install
+./target/release/cosmic-scribe --configure
+```
+
+Then complete **steps 5–6** above. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Upgrading from `voice-input`
+
+```bash
+cosmic-scribe --install    # migrates ~/.local/share/voice-input/ → cosmic-scribe/
+```
+
+Update your keyboard shortcut command to `cosmic-scribe --trigger`. Optional: `brew uninstall voice-input`.
 
 ## Uninstall
 
 ```bash
-voice-input --uninstall          # keep API key, recordings, settings
-voice-input --uninstall --purge  # delete ~/.local/share/voice-input/ too
-brew uninstall voice-input       # if installed via Homebrew
+cosmic-scribe --uninstall          # keep API key, recordings, settings
+cosmic-scribe --uninstall --purge  # delete ~/.local/share/cosmic-scribe/ too
+brew uninstall cosmic-scribe       # if installed via Homebrew
 ```
 
-See `scripts/uninstall.sh` if the shell still points at a removed `~/.local/bin/voice-input`.
+See `scripts/uninstall.sh` if the shell still points at a removed `~/.local/bin/cosmic-scribe`.
 
 ## Requirements
 
@@ -117,7 +174,7 @@ See `scripts/uninstall.sh` if the shell still points at a removed `~/.local/bin/
 | Desktop | COSMIC on Pop!_OS or Fedora, Wayland |
 | API | [xAI API key](https://console.x.ai/) |
 | Tools | `arecord`, `wl-clipboard`, `wtype` (default output mode), `libnotify` |
-| Command | `voice-input` |
+| Command | `cosmic-scribe` |
 
 ## Privacy
 
@@ -129,4 +186,4 @@ Microphone audio is sent to **xAI** for transcription. API keys and recording hi
 
 ---
 
-Developers: [CONTRIBUTING.md](CONTRIBUTING.md).
+**Developers:** [CONTRIBUTING.md](CONTRIBUTING.md) · **All docs:** [docs/README.md](docs/README.md)

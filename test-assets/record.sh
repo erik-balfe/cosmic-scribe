@@ -1,5 +1,5 @@
 #!/bin/bash
-# Record test audio for voice-input.
+# Record test audio for cosmic-scribe.
 # Usage: ./test-assets/record.sh <name>
 set -euo pipefail
 

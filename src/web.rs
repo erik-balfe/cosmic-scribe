@@ -12,10 +12,7 @@ use std::net::TcpListener;
 struct Assets;
 
 fn recordings_dir() -> std::path::PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| "/tmp".into())
-        .join("voice-input")
-        .join("recordings")
+    crate::lifecycle::recordings_dir()
 }
 
 fn serve_asset(path: &str) -> Option<(String, Vec<u8>)> {
@@ -53,6 +50,7 @@ fn handle_api(req: &str, body: &str) -> (String, String, String) {
         ("GET", p) if p.starts_with("/api/recording/") && p.contains("/audio") => api_audio(p),
         ("GET", p) if p.starts_with("/api/recording/") => api_recording_get(p),
         ("POST", p) if p.ends_with("/delete") => api_delete(p),
+        ("POST", p) if p.ends_with("/transcribe") => api_transcribe(p),
         ("POST", p) if p.ends_with("/correct") => api_correct(p, body),
         ("POST", p) if p.ends_with("/edit") => api_edit(p, body),
         ("GET", "/api/config") => api_config_get(),
@@ -162,6 +160,7 @@ fn api_recording_get(path: &str) -> (String, String, String) {
     let meta_path = recordings_dir().join(format!("{id}.json"));
 
     let text = std::fs::read_to_string(&txt_path).ok().unwrap_or_default();
+    let has_text = !text.trim().is_empty();
     let meta = std::fs::read_to_string(&meta_path)
         .ok()
         .and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
@@ -187,6 +186,7 @@ fn api_recording_get(path: &str) -> (String, String, String) {
         "duration": format!("{}s", dur_secs),
         "lang": crate::keyring::get_language(),
         "text": text,
+        "has_text": has_text,
         "has_stt": stt.is_some(),
         "stt": stt,
         "versions": meta.get("versions").cloned().unwrap_or(serde_json::json!([])),
@@ -261,6 +261,79 @@ fn api_edit(path: &str, body: &str) -> (String, String, String) {
         "application/json".into(),
         r#"{"ok":true}"#.into(),
     )
+}
+
+fn duration_ms_from_id(id: &str) -> u64 {
+    id.rsplit('_')
+        .next()
+        .and_then(|s| s.strip_suffix("ms"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+fn api_error(status: &str, msg: &str) -> (String, String, String) {
+    let json = serde_json::json!({ "ok": false, "error": msg }).to_string();
+    (status.into(), "application/json".into(), json)
+}
+
+fn api_transcribe(path: &str) -> (String, String, String) {
+    use crate::app::save_stt_artifacts;
+    use crate::keyring::ConfigFileKeyring;
+    use crate::stt::XaiSttClient;
+    use crate::traits::{AudioData, SttClient};
+    use std::sync::Arc;
+
+    let id = path
+        .strip_prefix("/api/recording/")
+        .unwrap_or("")
+        .trim_end_matches("/transcribe");
+    let raw_path = recordings_dir().join(format!("{id}.raw"));
+    if !raw_path.is_file() {
+        return api_error("404 Not Found", "recording not found");
+    }
+
+    let bytes = match std::fs::read(&raw_path) {
+        Ok(b) => b,
+        Err(e) => return api_error("500 Internal Server Error", &e.to_string()),
+    };
+
+    let keyring = Arc::new(ConfigFileKeyring);
+    match keyring.get_api_key() {
+        Ok(key) if !key.is_empty() => {}
+        _ => {
+            return api_error(
+                "400 Bad Request",
+                "API key not configured — open Settings to add your xAI key",
+            );
+        }
+    }
+
+    let audio = AudioData {
+        bytes,
+        sample_rate: 16000,
+        channels: 1,
+        duration_ms: duration_ms_from_id(id),
+    };
+    let stt: Arc<dyn SttClient> = Arc::new(XaiSttClient::new(keyring));
+
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(r) => r,
+        Err(e) => return api_error("500 Internal Server Error", &e.to_string()),
+    };
+
+    match rt.block_on(stt.transcribe(&audio)) {
+        Ok(result) => {
+            save_stt_artifacts(&raw_path, &result);
+            let json = serde_json::json!({
+                "ok": true,
+                "text": result.text,
+                "has_stt": !result.words.is_empty(),
+            })
+            .to_string();
+            ("200 OK".into(), "application/json".into(), json)
+        }
+        Err(e) => api_error("500 Internal Server Error", &e.to_string()),
+    }
 }
 
 fn api_delete(path: &str) -> (String, String, String) {
@@ -621,23 +694,16 @@ fn api_models() -> (String, String, String) {
     ("200 OK".into(), "application/json".into(), data)
 }
 
-pub fn run() -> anyhow::Result<()> {
-    // Fetch models in background — first API call triggers actual fetch
-    std::thread::spawn(|| {
-        load_models_cache();
-    });
+fn ui_url(addr: std::net::SocketAddr, start_path: &str) -> String {
+    let path = if start_path.is_empty() || start_path == "/" {
+        String::new()
+    } else {
+        start_path.to_string()
+    };
+    format!("http://{addr}{path}")
+}
 
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let addr = listener.local_addr()?;
-    let url = format!("http://{}", addr);
-    println!("Settings: {}", url);
-    if std::env::var("VOICE_INPUT_NO_BROWSER").is_err() {
-        let _ = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("xdg-open {} >/dev/null 2>&1 &", url))
-            .spawn();
-    }
-
+fn serve_listener(listener: TcpListener) {
     for stream in listener.incoming().flatten() {
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_request(&stream)));
@@ -652,6 +718,36 @@ pub fn run() -> anyhow::Result<()> {
             eprintln!("request handler panicked: {msg}");
         }
     }
+}
+
+/// Start the embedded UI API server on a background thread. Returns the URL to load (for Tauri / tests).
+pub fn spawn_server(start_path: &str) -> anyhow::Result<String> {
+    std::thread::spawn(load_models_cache);
+
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+    let url = ui_url(addr, start_path);
+    std::thread::spawn(move || serve_listener(listener));
+    Ok(url)
+}
+
+pub fn run() -> anyhow::Result<()> {
+    run_at("/")
+}
+
+pub fn run_at(start_path: &str) -> anyhow::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+    let url = ui_url(addr, start_path);
+    println!("UI: {}", url);
+    if crate::env_compat("COSMIC_SCRIBE_NO_BROWSER", "VOICE_INPUT_NO_BROWSER").is_none() {
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("xdg-open '{url}' >/dev/null 2>&1 &"))
+            .spawn();
+    }
+
+    serve_listener(listener);
     Ok(())
 }
 

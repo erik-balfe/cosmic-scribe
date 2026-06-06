@@ -18,12 +18,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 fn recordings_dir() -> std::path::PathBuf {
-    let dir = dirs::data_local_dir()
-        .unwrap_or_else(|| "/tmp".into())
-        .join("voice-input")
-        .join("recordings");
-    std::fs::create_dir_all(&dir).ok();
-    dir
+    crate::lifecycle::recordings_dir()
 }
 
 fn save_recording(bytes: &[u8], duration_ms: u64) -> std::path::PathBuf {
@@ -39,7 +34,7 @@ fn save_recording(bytes: &[u8], duration_ms: u64) -> std::path::PathBuf {
 }
 
 /// Plain `.txt` plus `.stt.json` (word timestamps) for history / karaoke UI.
-fn save_stt_artifacts(path: &std::path::Path, result: &SttResult) {
+pub(crate) fn save_stt_artifacts(path: &std::path::Path, result: &SttResult) {
     let txt = path.with_extension("txt");
     if let Err(e) = std::fs::write(&txt, &result.text) {
         tracing::warn!("failed to save transcript txt: {e}");
@@ -57,7 +52,7 @@ fn save_stt_artifacts(path: &std::path::Path, result: &SttResult) {
     }
 }
 
-/// STT request timeout. Override with VOICE_INPUT_STT_TIMEOUT_MS env var.
+/// STT request timeout. Override with COSMIC_SCRIBE_STT_TIMEOUT_MS (or legacy VOICE_INPUT_STT_TIMEOUT_MS).
 /// Default 60s. Set to 5000 for faster tests.
 #[cfg(not(test))]
 fn notify_clipboard_ready() {
@@ -71,8 +66,7 @@ fn notify_clipboard_ready() {
 fn notify_clipboard_ready() {}
 
 fn stt_timeout() -> Duration {
-    std::env::var("VOICE_INPUT_STT_TIMEOUT_MS")
-        .ok()
+    crate::env_compat("COSMIC_SCRIBE_STT_TIMEOUT_MS", "VOICE_INPUT_STT_TIMEOUT_MS")
         .and_then(|s| s.parse::<u64>().ok())
         .map(Duration::from_millis)
         .unwrap_or_else(|| Duration::from_secs(60))
@@ -145,7 +139,29 @@ impl App {
         self.tray = tray;
     }
 
+    fn api_key_configured(&self) -> bool {
+        self.keyring
+            .get_api_key()
+            .map(|k| !k.is_empty())
+            .unwrap_or(false)
+    }
+
     pub async fn process_event(&mut self, event: Event) {
+        if matches!(&event, Event::Toggle | Event::ToggleTray)
+            && matches!(self.state, AppState::Idle)
+            && !self.api_key_configured()
+        {
+            self.execute_commands(vec![
+                Command::ShowNotification {
+                    title: "API key required".into(),
+                    body: "Set your xAI API key in Settings before recording.".into(),
+                },
+                Command::OpenSettings,
+            ])
+            .await;
+            return;
+        }
+
         if let Event::AudioCaptured { duration_ms, .. } = &event {
             self.last_duration_ms = *duration_ms;
         }
@@ -271,10 +287,12 @@ impl App {
                     let generation = self.transcribe_generation.clone();
 
                     tokio::spawn(async move {
-                        let max_retries: usize = std::env::var("VOICE_INPUT_STT_RETRIES")
-                            .ok()
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(3);
+                        let max_retries: usize = crate::env_compat(
+                            "COSMIC_SCRIBE_STT_RETRIES",
+                            "VOICE_INPUT_STT_RETRIES",
+                        )
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(3);
                         let mut last_err = String::new();
 
                         for attempt in 0..=max_retries {
@@ -385,7 +403,12 @@ impl App {
                 }
 
                 OpenHistory => {
-                    let exe = std::env::current_exe().unwrap_or_else(|_| "voice-input".into());
+                    let exe = std::env::current_exe().unwrap_or_else(|_| crate::APP_SLUG.into());
+                    let _ = std::process::Command::new(exe).arg("--history").spawn();
+                }
+
+                OpenSettings => {
+                    let exe = std::env::current_exe().unwrap_or_else(|_| crate::APP_SLUG.into());
                     let _ = std::process::Command::new(exe).arg("--settings").spawn();
                 }
 
@@ -492,6 +515,9 @@ mod tests {
     struct MockKeyring(&'static str);
     impl KeyringStore for MockKeyring {
         fn get_api_key(&self) -> anyhow::Result<String> {
+            if self.0.is_empty() {
+                anyhow::bail!("no API key");
+            }
             Ok(self.0.into())
         }
         fn set_api_key(&self, _: &str) -> anyhow::Result<()> {
@@ -517,6 +543,20 @@ mod tests {
             Arc::new(MockKeyring("test-key")),
             Box::new(MockTray(AtomicU32::new(0))),
         )
+    }
+
+    #[tokio::test]
+    async fn test_toggle_without_api_key_stays_idle() {
+        let mut app = App::new(
+            Box::new(MockCapture::with_duration(2000)),
+            Arc::new(MockStt("hello world")),
+            Box::new(MockInjector),
+            Arc::new(MockKeyring("")),
+            Box::new(MockTray(AtomicU32::new(0))),
+        );
+
+        app.process_event(Event::Toggle).await;
+        assert_eq!(app.current_state(), &AppState::Idle);
     }
 
     #[tokio::test]

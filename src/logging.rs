@@ -1,6 +1,6 @@
 // ── Structured logging ────────────────────────────────────────
 // Uses tracing for structured, async-aware logging.
-// Set RUST_LOG=voice_input=debug for verbose output.
+// Set RUST_LOG=cosmic_scribe=debug for verbose output.
 //
 // Log events cover the full lifecycle:
 //   state_transition, audio_captured, transcript_ready, text_injected,

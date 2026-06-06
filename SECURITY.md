@@ -6,8 +6,8 @@ Email **erik.balfe@proton.me** with a description and steps to reproduce. Do not
 
 ## Scope
 
-- API key storage (`~/.local/share/voice-input/`)
-- Local recording files under `~/.local/share/voice-input/recordings/`
+- API key storage (`~/.local/share/cosmic-scribe/`)
+- Local recording files under `~/.local/share/cosmic-scribe/recordings/`
 - Network traffic to xAI (and optional OpenRouter for beta correction)
 
 ## Out of scope

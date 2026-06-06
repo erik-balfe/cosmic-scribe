@@ -24,7 +24,7 @@ Legacy config values `auto`, `always`, `never` map to `wtype` / `clipboard`.
 
 ### Environment
 
-- `VOICE_INPUT_WTYPE_DELAY_MS` — delay between keys when using wtype mode (default `0`).
+- `COSMIC_SCRIBE_WTYPE_DELAY_MS` — delay between keys when using wtype mode (default `0`; legacy `VOICE_INPUT_WTYPE_DELAY_MS` still works).
 
 ## Recommendations
 

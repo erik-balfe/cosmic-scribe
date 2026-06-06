@@ -1,18 +1,19 @@
+use cosmic_scribe::app::App;
+use cosmic_scribe::audio::{FileAudioCapture, SubprocessCapture};
+use cosmic_scribe::injector::WaylandInjector;
+use cosmic_scribe::ipc;
+use cosmic_scribe::keyring::{self, ConfigFileKeyring};
+use cosmic_scribe::lifecycle;
+use cosmic_scribe::logging;
+use cosmic_scribe::state::Event;
+use cosmic_scribe::stt::XaiSttClient;
+use cosmic_scribe::traits::SttClient;
+use cosmic_scribe::traits::{KeyringStore, TrayController};
+use cosmic_scribe::tray;
+use cosmic_scribe::web;
+use cosmic_scribe::APP_SLUG;
 use ksni::TrayMethods;
 use std::sync::Arc;
-use voice_input::app::App;
-use voice_input::audio::{FileAudioCapture, SubprocessCapture};
-use voice_input::injector::WaylandInjector;
-use voice_input::ipc;
-use voice_input::keyring::{self, ConfigFileKeyring};
-use voice_input::lifecycle;
-use voice_input::logging;
-use voice_input::state::Event;
-use voice_input::stt::XaiSttClient;
-use voice_input::traits::SttClient;
-use voice_input::traits::{KeyringStore, TrayController};
-use voice_input::tray;
-use voice_input::web;
 
 struct CliTray;
 impl TrayController for CliTray {
@@ -108,9 +109,15 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if args.iter().any(|a| a == "--history") {
+        println!("Starting history UI...");
+        web::run_at("/")?;
+        return Ok(());
+    }
+
     if args.iter().any(|a| a == "--settings") {
-        println!("Starting web settings UI...");
-        web::run()?;
+        println!("Starting settings UI...");
+        web::run_at("/settings")?;
         return Ok(());
     }
 
@@ -151,7 +158,7 @@ fn print_usage() {
     eprintln!("  --restart            Stop then start daemon");
     eprintln!("  --status             Running? installed path? IPC socket?");
     eprintln!("  --uninstall          Stop daemon; remove ~/.local install + autostart");
-    eprintln!("  --purge              With --uninstall: also delete ~/.local/share/voice-input/");
+    eprintln!("  --purge              With --uninstall: also delete ~/.local/share/{APP_SLUG}/");
     eprintln!("  --daemon             Run in foreground (used by --start; not for daily use)");
     eprintln!();
     eprintln!("Dictation:");
@@ -161,7 +168,8 @@ fn print_usage() {
     eprintln!();
     eprintln!("Setup:");
     eprintln!("  --configure          Interactive API key + language");
-    eprintln!("  --settings           Web UI (history + settings)");
+    eprintln!("  --history            Web UI — recording history");
+    eprintln!("  --settings           Web UI — API key, language, output mode");
     eprintln!("  --autostart          Enable login autostart only");
     eprintln!("  --set-key KEY        Store xAI API key");
     eprintln!("  --clear-key          Remove stored API key");
@@ -196,10 +204,10 @@ async fn file_input(path: &str) -> anyhow::Result<()> {
     tx.send(Event::Toggle).ok(); // Recording → Transcribing (triggers file read)
 
     // Wait for processing to complete or timeout
-    let timeout = std::env::var("VOICE_INPUT_STT_TIMEOUT_MS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(60_000);
+    let timeout =
+        cosmic_scribe::env_compat("COSMIC_SCRIBE_STT_TIMEOUT_MS", "VOICE_INPUT_STT_TIMEOUT_MS")
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(60_000);
     let _ = tokio::time::timeout(std::time::Duration::from_millis(timeout + 5000), done).await;
     handle.abort();
     tracing::info!("done");
@@ -258,7 +266,7 @@ async fn daemon_mode() -> anyhow::Result<()> {
     tokio::spawn(ipc::spawn_listener(ipc_tx));
 
     tracing::info!(
-        "Cosmic Scribe daemon — use 'voice-input --trigger', tray click, or Ctrl+C to stop"
+        "Cosmic Scribe daemon — use '{APP_SLUG} --trigger', tray click, or Ctrl+C to stop"
     );
 
     tokio::select! {

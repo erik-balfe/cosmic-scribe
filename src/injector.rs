@@ -30,8 +30,7 @@ impl TextInjector for WaylandInjector {
 }
 
 fn wtype_delay_ms() -> u64 {
-    std::env::var("VOICE_INPUT_WTYPE_DELAY_MS")
-        .ok()
+    crate::env_compat("COSMIC_SCRIBE_WTYPE_DELAY_MS", "VOICE_INPUT_WTYPE_DELAY_MS")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0)
 }

@@ -1,5 +1,5 @@
 // ── API key storage ───────────────────────────────────────────
-// Stores app config in ~/.local/share/voice-input/
+// Stores app config in ~/.local/share/cosmic-scribe/
 //   api-key — xAI API key, AES-256-GCM encrypted (0600)
 //   lang    — STT language code
 //
@@ -23,11 +23,7 @@ const NONCE_LEN: usize = 12;
 const SALT: &[u8] = b"voice-input-api-key-v1";
 
 fn config_dir() -> PathBuf {
-    let base = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("voice-input");
-    fs::create_dir_all(&base).ok();
-    base
+    crate::lifecycle::data_dir()
 }
 
 fn key_path() -> PathBuf {
@@ -100,8 +96,7 @@ fn is_encrypted(data: &[u8]) -> bool {
 }
 
 pub fn get_language() -> String {
-    std::env::var("VOICE_INPUT_LANG")
-        .ok()
+    crate::env_compat("COSMIC_SCRIBE_LANG", "VOICE_INPUT_LANG")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
             let path = lang_path();
@@ -153,8 +148,7 @@ fn correction_key_path() -> PathBuf {
 }
 
 pub fn get_correction_key() -> String {
-    std::env::var("VOICE_INPUT_CORRECTION_KEY")
-        .ok()
+    crate::env_compat("COSMIC_SCRIBE_CORRECTION_KEY", "VOICE_INPUT_CORRECTION_KEY")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
             let path = correction_key_path();
@@ -206,7 +200,8 @@ pub struct ConfigFileKeyring;
 
 impl KeyringStore for ConfigFileKeyring {
     fn get_api_key(&self) -> Result<String> {
-        if let Ok(key) = std::env::var("VOICE_INPUT_XAI_API_KEY") {
+        if let Some(key) = crate::env_compat("COSMIC_SCRIBE_XAI_API_KEY", "VOICE_INPUT_XAI_API_KEY")
+        {
             if !key.is_empty() {
                 return Ok(key);
             }
@@ -214,7 +209,7 @@ impl KeyringStore for ConfigFileKeyring {
         let path = key_path();
         let data = fs::read(&path).with_context(|| {
             format!(
-                "no API key found at {} or in VOICE_INPUT_XAI_API_KEY env",
+                "no API key found at {} or in COSMIC_SCRIBE_XAI_API_KEY / VOICE_INPUT_XAI_API_KEY env",
                 path.display()
             )
         })?;

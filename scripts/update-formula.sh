@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Update Formula/voice-input.rb for a tagged release (used locally and in CI).
+# Update Formula/cosmic-scribe.rb for a tagged release (used locally and in CI).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${1:?usage: $0 VERSION (e.g. 0.1.0)}"
-FORMULA="Formula/voice-input.rb"
+FORMULA="Formula/cosmic-scribe.rb"
 URL="https://github.com/erik-balfe/cosmic-scribe/archive/refs/tags/v${VERSION}.tar.gz"
 
 echo "==> Fetching ${URL}"

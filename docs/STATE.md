@@ -1,6 +1,8 @@
 # STATE — Cosmic Scribe
 
-Last updated: 2026-06-05
+Last updated: 2026-06-06
+
+**Docs index:** [`docs/README.md`](README.md) · **Tasks:** [`docs/BACKLOG.md`](BACKLOG.md) · **Shortcut:** [`docs/SHORTCUT.md`](SHORTCUT.md) · **Tauri:** [`docs/TAURI.md`](TAURI.md)
 
 Internal engineering log (not marketing copy). Keep in sync with `docs/KARAOKE.md` and `docs/RELEASE.md`.
 
@@ -43,7 +45,8 @@ See `docs/RELEASE.md`, `docs/DISTRIBUTION.md`, `docs/OUTREACH.md`.
 
 ## Low
 
-- VAD, configurable input device, manual re-transcribe from history
+- VAD, configurable input device
+- Re-transcribe from history — **done** (`POST /api/recording/:id/transcribe`)
 - Optional: WebSocket STT only if we add *live* captions (not for dictation paste)
 
 ## Changed decisions
