@@ -25,6 +25,10 @@ for arg in "$@"; do
   esac
 done
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+"$ROOT/scripts/uninstall-gui-prod.sh" 2>/dev/null || true
+"$ROOT/scripts/uninstall-gui-debug.sh" 2>/dev/null || true
+
 if [ -n "$BIN" ] && [ -x "$BIN" ]; then
   if [ "$PURGE" -eq 1 ]; then
     exec "$BIN" --uninstall --purge
@@ -39,7 +43,9 @@ pkill -f 'voice-input.*--daemon' 2>/dev/null || true
 
 rm -f "${HOME}/.local/bin/cosmic-scribe"
 rm -f "${HOME}/.local/bin/voice-input"
+rm -f "${HOME}/.local/bin/cosmic-scribe-gui"
 rm -f "${HOME}/.local/bin/cosmic-scribe-gui-debug"
+rm -f "${HOME}/.local/share/cosmic-scribe/cosmic-scribe-gui"
 rm -f "${HOME}/.local/share/cosmic-scribe/cosmic-scribe"
 rm -f "${HOME}/.local/share/cosmic-scribe/voice-input"
 rm -f "${HOME}/.local/share/voice-input/voice-input"

@@ -2,7 +2,7 @@
 // StatusNotifierItem via D-Bus (ksni crate).
 // Left click: toggle recording (start/stop).
 // Right click: menu with Cancel, Settings, Quit.
-// Mic-only icon (no background), theme-aware, tinted by state.
+// Mic-only icon: recording = red capsule; transcribing = blue capsule; idle = theme colors.
 
 use crate::keyring;
 use crate::state::Event;
@@ -22,13 +22,20 @@ fn rgba_to_argb(rgba: &mut [u8]) {
 }
 
 const RED: (u8, u8, u8) = (220, 40, 40);
-const GRAY: (u8, u8, u8) = (150, 150, 150);
+const BLUE: (u8, u8, u8) = (55, 140, 255);
 const GREEN: (u8, u8, u8) = (60, 170, 60);
 const MIC_LIGHT: (u8, u8, u8) = (238, 241, 248); // #eef1f8 on dark panels
 const MIC_DARK: (u8, u8, u8) = (26, 34, 56); // #1a2238 on light panels
 
-const TRAY_ICON_22: &[u8] = include_bytes!("../gui/icons/tray-22.png");
-const TRAY_ICON_44: &[u8] = include_bytes!("../gui/icons/tray-44.png");
+const TRAY_CAPSULE_22: &[u8] = include_bytes!("../gui/icons/tray-capsule-22.png");
+const TRAY_CAPSULE_44: &[u8] = include_bytes!("../gui/icons/tray-capsule-44.png");
+const TRAY_BODY_22: &[u8] = include_bytes!("../gui/icons/tray-body-22.png");
+const TRAY_BODY_44: &[u8] = include_bytes!("../gui/icons/tray-body-44.png");
+#[derive(Clone, Copy)]
+enum TrayMask {
+    Body,
+    Capsule,
+}
 
 pub fn mic_color(dark_ui: bool) -> (u8, u8, u8) {
     if dark_ui {
@@ -60,76 +67,47 @@ fn decode_png_rgba(bytes: &[u8]) -> (i32, Vec<u8>) {
     (w, rgba)
 }
 
-fn base_icon(size: i32) -> &'static (i32, Vec<u8>) {
-    static ICON_22: OnceLock<(i32, Vec<u8>)> = OnceLock::new();
-    static ICON_44: OnceLock<(i32, Vec<u8>)> = OnceLock::new();
-    if size >= 44 {
-        ICON_44.get_or_init(|| decode_png_rgba(TRAY_ICON_44))
-    } else {
-        ICON_22.get_or_init(|| decode_png_rgba(TRAY_ICON_22))
-    }
-}
-
-fn draw_circle(data: &mut [u8], size: i32, r: u8, g: u8, b: u8, alpha: u8) {
-    let cx = (size / 2) as f32;
-    let cy = (size / 2) as f32;
-    let radius = size as f32 * 0.42;
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let dist = (dx * dx + dy * dy).sqrt();
-            let idx = (y * size + x) as usize * 4;
-            if dist <= radius + 0.5 {
-                data[idx] = r;
-                data[idx + 1] = g;
-                data[idx + 2] = b;
-                data[idx + 3] = alpha;
+fn mask_layer(size: i32, part: TrayMask) -> &'static (i32, Vec<u8>) {
+    static CAPSULE_22: OnceLock<(i32, Vec<u8>)> = OnceLock::new();
+    static CAPSULE_44: OnceLock<(i32, Vec<u8>)> = OnceLock::new();
+    static BODY_22: OnceLock<(i32, Vec<u8>)> = OnceLock::new();
+    static BODY_44: OnceLock<(i32, Vec<u8>)> = OnceLock::new();
+    match part {
+        TrayMask::Capsule => {
+            if size >= 44 {
+                CAPSULE_44.get_or_init(|| decode_png_rgba(TRAY_CAPSULE_44))
+            } else {
+                CAPSULE_22.get_or_init(|| decode_png_rgba(TRAY_CAPSULE_22))
+            }
+        }
+        TrayMask::Body => {
+            if size >= 44 {
+                BODY_44.get_or_init(|| decode_png_rgba(TRAY_BODY_44))
+            } else {
+                BODY_22.get_or_init(|| decode_png_rgba(TRAY_BODY_22))
             }
         }
     }
 }
 
-fn blend_channel(base: u8, tint: u8, amount: f32) -> u8 {
-    ((f32::from(base) * (1.0 - amount)) + (f32::from(tint) * amount)).round() as u8
-}
-
-fn apply_theme_color(rgba: &mut [u8], dark_ui: bool) {
-    let (r, g, b) = mic_color(dark_ui);
-    for px in rgba.chunks_exact_mut(4) {
-        if px[3] == 0 {
+fn paint_mask(pixels: &mut [u8], mask: &[u8], color: (u8, u8, u8)) {
+    for (px, m) in pixels.chunks_exact_mut(4).zip(mask.chunks_exact(4)) {
+        if m[3] == 0 {
             continue;
         }
-        px[0] = r;
-        px[1] = g;
-        px[2] = b;
+        px[0] = color.0;
+        px[1] = color.1;
+        px[2] = color.2;
+        px[3] = 255;
     }
 }
 
-fn apply_state_tint(rgba: &mut [u8], state: &str) {
-    let (tr, tg, tb, amount) = match state {
-        "transcribing" => (GRAY.0, GRAY.1, GRAY.2, 0.55),
-        "inserting" => (GREEN.0, GREEN.1, GREEN.2, 0.45),
-        "error" => (RED.0, RED.1, RED.2, 0.5),
-        _ => return,
-    };
-
-    for px in rgba.chunks_exact_mut(4) {
-        if px[3] == 0 {
-            continue;
-        }
-        if state == "transcribing" {
-            let lum =
-                (0.299 * f32::from(px[0]) + 0.587 * f32::from(px[1]) + 0.114 * f32::from(px[2]))
-                    .round() as u8;
-            px[0] = lum;
-            px[1] = lum;
-            px[2] = lum;
-        } else {
-            px[0] = blend_channel(px[0], tr, amount);
-            px[1] = blend_channel(px[1], tg, amount);
-            px[2] = blend_channel(px[2], tb, amount);
-        }
+fn capsule_color(state: &str, dark_ui: bool) -> (u8, u8, u8) {
+    match state {
+        "recording" | "error" => RED,
+        "transcribing" => BLUE,
+        "inserting" => GREEN,
+        _ => mic_color(dark_ui),
     }
 }
 
@@ -137,26 +115,43 @@ pub fn build_icon(state: &str) -> Icon {
     build_icon_sized(state, ui_prefers_dark(), 22)
 }
 
-fn build_icon_sized(state: &str, dark_ui: bool, size: i32) -> Icon {
+fn compose_icon_rgba(state: &str, dark_ui: bool, size: i32) -> Vec<u8> {
+    let (body_w, body_mask) = mask_layer(size, TrayMask::Body);
+    let (cap_w, cap_mask) = mask_layer(size, TrayMask::Capsule);
+    assert_eq!(*body_w, size);
+    assert_eq!(*cap_w, size);
+
     let mut pixels = vec![0u8; (size * size * 4) as usize];
+    let body_color = mic_color(dark_ui);
+    paint_mask(&mut pixels, body_mask, body_color);
+    paint_mask(&mut pixels, cap_mask, capsule_color(state, dark_ui));
+    pixels
+}
 
-    if state == "recording" {
-        draw_circle(&mut pixels, size, RED.0, RED.1, RED.2, 255);
-    } else {
-        let (src_w, src_rgba) = base_icon(size);
-        assert_eq!(*src_w, size, "tray icon size mismatch");
-        pixels.copy_from_slice(src_rgba);
-        apply_theme_color(&mut pixels, dark_ui);
-        apply_state_tint(&mut pixels, state);
-    }
-
+fn build_icon_sized(state: &str, dark_ui: bool, size: i32) -> Icon {
+    let mut pixels = compose_icon_rgba(state, dark_ui, size);
     rgba_to_argb(&mut pixels);
-
     Icon {
         width: size,
         height: size,
         data: pixels,
     }
+}
+
+/// Write a tray-state PNG for docs/screenshots (RGBA, upscaled for readability).
+pub fn write_icon_png(
+    path: &std::path::Path,
+    state: &str,
+    dark_ui: bool,
+    size: i32,
+) -> anyhow::Result<()> {
+    let pixels = compose_icon_rgba(state, dark_ui, size);
+    let mut encoder = png::Encoder::new(std::fs::File::create(path)?, size as u32, size as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&pixels)?;
+    Ok(())
 }
 
 pub async fn watch_ui_theme(handle: ksni::Handle<VoiceTray>) {
@@ -316,15 +311,26 @@ impl Tray for VoiceTray {
 mod tests {
     use super::*;
 
+    fn capsule_center_argb(icon: &Icon) -> (u8, u8, u8) {
+        let idx = (8 * icon.width as usize + 11) * 4;
+        (icon.data[idx + 1], icon.data[idx + 2], icon.data[idx + 3])
+    }
+
     #[test]
-    fn recording_icon_uses_red_channel_in_argb() {
+    fn recording_capsule_is_red() {
         let icon = build_icon_sized("recording", true, 22);
-        let idx = (11 * icon.width as usize + 11) * 4;
-        // ARGB byte order: A, R, G, B
-        let r = icon.data[idx + 1];
-        let b = icon.data[idx + 3];
-        assert!(r > 200, "red channel expected, got r={r} b={b}");
-        assert!(b < 100, "blue should be low, got b={b}");
+        let (r, g, b) = capsule_center_argb(&icon);
+        assert!(
+            r > 200 && g < 80 && b < 80,
+            "red capsule, got r={r} g={g} b={b}"
+        );
+    }
+
+    #[test]
+    fn transcribing_capsule_is_blue() {
+        let icon = build_icon_sized("transcribing", true, 22);
+        let (r, g, b) = capsule_center_argb(&icon);
+        assert!(b > 200 && r < 120, "blue capsule, got r={r} g={g} b={b}");
     }
 
     #[test]
@@ -337,10 +343,7 @@ mod tests {
     #[test]
     fn idle_mic_is_light_on_dark_ui() {
         let icon = build_icon_sized("idle", true, 22);
-        let idx = (11 * icon.width as usize + 11) * 4;
-        let r = icon.data[idx + 1];
-        let g = icon.data[idx + 2];
-        let b = icon.data[idx + 3];
+        let (r, g, b) = capsule_center_argb(&icon);
         assert!(
             r > 200 && g > 200 && b > 200,
             "light mic expected, got r={r} g={g} b={b}"
@@ -350,32 +353,10 @@ mod tests {
     #[test]
     fn idle_mic_is_dark_on_light_ui() {
         let icon = build_icon_sized("idle", false, 22);
-        let idx = (11 * icon.width as usize + 11) * 4;
-        let r = icon.data[idx + 1];
-        let g = icon.data[idx + 2];
-        let b = icon.data[idx + 3];
+        let (r, g, b) = capsule_center_argb(&icon);
         assert!(
             r < 40 && g < 50 && b < 70,
             "dark mic expected, got r={r} g={g} b={b}"
-        );
-    }
-
-    #[test]
-    fn transcribing_icon_is_grayscale() {
-        let idle = build_icon_sized("idle", true, 22);
-        let gray = build_icon_sized("transcribing", true, 22);
-        let idx = (11 * idle.width as usize + 11) * 4;
-        let ir = idle.data[idx + 1];
-        let ig = idle.data[idx + 2];
-        let gr = gray.data[idx + 1];
-        let gg = gray.data[idx + 2];
-        assert!(
-            (gr as i16 - gg as i16).abs() < 5,
-            "transcribing should be gray, got r={gr} g={gg}"
-        );
-        assert!(
-            ir != gr || ig != gg,
-            "transcribing tint should differ from idle at center"
         );
     }
 }

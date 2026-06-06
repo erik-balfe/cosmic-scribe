@@ -18,7 +18,7 @@ There is no single “COSMIC app registry” like GNOME Circle. Practical path: 
 
 ## Message angles
 
-- Built on COSMIC daily; tray shows recording state (red dot).
+- Built on COSMIC daily; tray shows recording (red) and recognizing (blue) states.
 - Shortcut dictation into any app; history for replay/edit.
 - Requires xAI API key; honest about cloud STT.
 

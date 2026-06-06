@@ -6,7 +6,9 @@ Internal and user-adjacent docs. The main [README](../README.md) is the public l
 
 | Doc | Purpose |
 |-----|---------|
-| [../README.md](../README.md) | Install, configure, daily use |
+| [../README.md](../README.md) | Landing page — quick start, tray states, screenshots |
+| [INSTALL.md](INSTALL.md) | **Full install** — runtime + Tauri build deps, Homebrew vs clone, upgrade |
+| [SCREENSHOTS.md](SCREENSHOTS.md) | README / release screenshots (seed data + capture guide) |
 | [SHORTCUT.md](SHORTCUT.md) | **Global keyboard shortcut** (`cosmic-scribe --trigger`) on COSMIC |
 | [OUTPUT.md](OUTPUT.md) | Clipboard vs wtype output modes |
 

@@ -1,6 +1,6 @@
 # STATE — Cosmic Scribe
 
-Last updated: 2026-06-06
+Last updated: 2026-06-07
 
 **Docs index:** [`docs/README.md`](README.md) · **Tasks:** [`docs/BACKLOG.md`](BACKLOG.md) · **Shortcut:** [`docs/SHORTCUT.md`](SHORTCUT.md) · **Tauri:** [`docs/TAURI.md`](TAURI.md)
 
@@ -12,11 +12,11 @@ Internal engineering log (not marketing copy). Keep in sync with `docs/KARAOKE.m
 - Pure state machine: Idle / Recording / Transcribing / Inserting / Error
 - IO behind traits — **44+ tests**
 - **Batch REST** xAI STT (`POST /v1/stt`) — full file after stop, not WebSocket streaming
-- STT retry + timeout; transcribing tray = gray mic; ignore tray click during STT
+- STT retry + timeout; tray capsule: red = recording, blue = transcribing; ignore tray click during STT
 - **Text output**: wtype default (`docs/OUTPUT.md`); optional clipboard-only in Settings
 - Per-recording artifacts: `.raw`, `.txt`, **`.stt.json`** (word timestamps + raw API JSON)
 - Unix socket IPC, AES-256-GCM API keys, language config
-- Tray SNI (Cosmic Scribe title); History + Settings → `--settings`
+- Tray SNI (Cosmic Scribe title); History + Settings → **cosmic-scribe-gui** (Tauri prod)
 - Web UI: history list, detail (waveform, versions, user edit, Copy + toast)
 - Lifecycle: `--install`, `--update`, `--start`, `--stop`, `--status`
 - AI correction via OpenRouter (beta)

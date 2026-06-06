@@ -25,6 +25,12 @@ for size in 22 44; do
   magick -background none -density 384 "$TRAY_SVG" -type TrueColorAlpha -depth 8 \
     -resize "${size}x${size}" "PNG32:${ICON_DIR}/tray-${size}.png"
   echo "wrote $ICON_DIR/tray-${size}.png"
+  for part in capsule body; do
+    magick -background none -density 384 "$ICON_DIR/icon-tray-${part}.svg" \
+      -type TrueColorAlpha -depth 8 -resize "${size}x${size}" \
+      "PNG32:${ICON_DIR}/tray-${part}-${size}.png"
+    echo "wrote $ICON_DIR/tray-${part}-${size}.png"
+  done
 done
 
 cp -f "$ICON_DIR/128x128.png" "$ICON_DIR/icon.png"

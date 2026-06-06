@@ -1,8 +1,10 @@
 # Tauri — native UI option for Cosmic Scribe
 
-Last updated: 2026-06-06
+Last updated: 2026-06-07
 
-Research note for backlog item **R1** ([BACKLOG.md](BACKLOG.md)). Approved for step-by-step migration.
+**Status:** Prod **`cosmic-scribe-gui`** shipped (`./scripts/install-gui-prod.sh`). Tray still spawns Tauri, not browser. This doc is architecture/history for contributors.
+
+Research note for backlog item **R1** ([BACKLOG.md](BACKLOG.md)).
 
 **Doc index:** [README.md](README.md)
 

@@ -1,171 +1,131 @@
 # Cosmic Scribe
 
-Typing breaks your flow when you already know what you want to say. **Cosmic Scribe** is voice dictation for the [COSMIC desktop](https://github.com/pop-os/cosmic-epoch) on Pop!_OS and Fedora (Wayland): press a shortcut or use the tray, speak, and get recognized text in your app—or on the clipboard. Transcription uses [xAI Grok speech-to-text](https://docs.x.ai/developers/models/speech-to-text) (paid API key required).
+**Native voice dictation for the COSMIC desktop** — press a shortcut, speak, and text lands in your app. A tray mic shows what’s happening; **History** and **Settings** live in a focused app window. No clutter, no CLI for daily use.
 
-## Who it's for
+Built for [COSMIC](https://github.com/pop-os/cosmic-epoch) on Pop!_OS and Fedora (Wayland). Transcription uses [xAI Grok speech-to-text](https://docs.x.ai/developers/models/speech-to-text) (paid API key).
 
-Linux users on **COSMIC** who want reliable **speech-to-text on Wayland** with a visible tray status (idle / recording / transcribing). Built for daily dictation, not as a generic cross-desktop suite.
+## Why Cosmic Scribe
 
-## What you get
+| What you get | Why it matters |
+|--------------|----------------|
+| **Global shortcut** | One key combo — bind `cosmic-scribe --trigger` in **Settings → Keyboard** ([guide](docs/SHORTCUT.md)). Fastest way to dictate. |
+| **Tray mic** | Always visible status — see [Tray states](#tray-mic-states) below. Left-click to record when idle. |
+| **Native app** | **Cosmic Scribe** in the app menu — **History** and **Settings** tabs, same data as the daemon. |
+| **Clipboard + typing** | Every transcript hits the clipboard; default mode also types into the focused field (`wtype`). |
+| **History on disk** | Local recordings + transcripts. Copy an older take, edit text, listen back — or **Re-transcribe** if the network failed earlier. |
+| **Minimal scope** | Dictation, tray, history, settings. No account system, no cloud sync, no feature bloat. |
 
-### Dictation and recognition
+## Tray mic states
 
-- **Global shortcut** — bind `cosmic-scribe --trigger` in COSMIC keyboard settings; press to start/stop recording. **Step-by-step:** [docs/SHORTCUT.md](docs/SHORTCUT.md).
-- **Tray mic** — left-click to record when idle; icon shows **white mic → red dot (recording) → gray mic (transcribing)**.
-- **Cloud STT** — after you stop, audio is sent to xAI; the transcript is what you get for pasting or review.
-- **Language** — default **en**; set any code xAI accepts (Settings or `cosmic-scribe --configure` / `--set-lang`).
+The **capsule** (top of the mic) changes color; the stand stays in your theme colors.
 
-### Text output (clipboard is always updated)
+| State | Capsule | What it means |
+|-------|---------|---------------|
+| Idle | White / dark (theme) | Ready — shortcut or tray click to record |
+| **Recording** | **Red** | Microphone is on — speak now |
+| **Recognizing** | **Blue** | Audio is being transcribed — usually a few seconds |
 
-Every successful transcription is **copied to the clipboard**. On top of that:
+This legend is also in **Settings** inside the app.
 
-| Mode | What happens |
-|------|----------------|
-| **wtype** (default) | Clipboard + simulated typing into the focused field (`wtype`, no per-key delay). Best for editors and browsers. |
-| **clipboard** | Clipboard only + notification; you paste yourself (good for **terminals**). |
-
-Change mode in **Settings** (tray → Settings). Details: [docs/OUTPUT.md](docs/OUTPUT.md).
-
-### Cancel mistakes
-
-- **While recording** — tray right-click → **Cancel recording**, or stop via shortcut.
-- **While transcribing** — tray right-click → **Cancel transcription** (in-flight STT is dropped).
-- **While transcribing** — new shortcut/tray toggles are **ignored** so you do not accidentally start another take on top of a running job.
-
-### History and Settings (tray right-click)
-
-| Menu item | Opens |
-|-----------|--------|
-| **History** | Web UI — list of past recordings, open any item |
-| **Settings** | Web UI — API key, language, output mode |
-| **Quit** | Stops the daemon |
-
-**History** keeps local files under `~/.local/share/cosmic-scribe/recordings/` (audio `.raw`, transcript `.txt`, optional word timings `.stt.json`). Use it to:
-
-- **Copy** an older transcript if you started a new recording and did not paste the previous one
-- **Listen** and check whether recognition was correct
-- **Edit** text and keep versions
-- **Transcribe** recordings that failed earlier (no internet, missing API key, etc.)
-
-**Settings** also offers experimental OpenRouter “AI correction” (beta; often unreliable).
-
-### Service commands
-
-| Command | Purpose |
-|---------|---------|
-| `cosmic-scribe --install` | Install daemon binary, autostart, start tray |
-| `cosmic-scribe --update` | Replace installed binary and restart |
-| `cosmic-scribe --status` | Daemon running? paths? |
-| `cosmic-scribe --stop` | Stop daemon |
-| `cosmic-scribe --uninstall` | Remove user install (keep data) |
-| `cosmic-scribe --uninstall --purge` | Remove user install and all local data |
+| Idle | Recording | Recognizing |
+|:---:|:---:|:---:|
+| ![Idle](screenshots/tray-idle.png) | ![Recording](screenshots/tray-recording.png) | ![Recognizing](screenshots/tray-transcribing.png) |
 
 ## Screenshots
 
-| Idle (white mic) | Recording (red dot) | Processing (gray mic) |
+**App window** (demo data — `./scripts/capture-screenshots.sh`):
+
+| History | Settings | Detail + waveform |
 |:---:|:---:|:---:|
-| ![Idle](screenshots/tray-idle.png) | ![Recording](screenshots/tray-recording.png) | ![Processing](screenshots/tray-processing.png) |
+| ![History](screenshots/app-history.png) | ![Settings](screenshots/app-settings.png) | ![Detail](screenshots/app-detail.png) |
 
-## Quick start (recommended)
+## Quick start
 
-End-to-end setup on Fedora/COSMIC: **install → API key → global shortcut → test**.
+Full install guide (dependencies, Homebrew vs source, Tauri GUI): **[docs/INSTALL.md](docs/INSTALL.md)**
 
-### 1. System dependencies
+### 1. Dependencies
 
 ```bash
 sudo dnf install alsa-utils wl-clipboard wtype libnotify
 ```
 
-### 2. Install via Homebrew (Linux)
+### 2. Install (daemon + app window)
 
-```bash
-brew tap erik-balfe/cosmic-scribe https://github.com/erik-balfe/cosmic-scribe
-brew install erik-balfe/cosmic-scribe/cosmic-scribe
-```
-
-### 3. Install the tray daemon
-
-Homebrew puts the binary in your brew prefix; `--install` adds `~/.local/bin/cosmic-scribe`, autostart, and starts the daemon:
-
-```bash
-$(brew --prefix)/bin/cosmic-scribe --install
-cosmic-scribe --status    # daemon: running
-```
-
-You should see the **mic tray icon** in the panel.
-
-### 4. Configure your xAI API key
-
-Get a key from [console.x.ai](https://console.x.ai/), then:
-
-```bash
-cosmic-scribe --configure
-```
-
-Or tray → **Settings** → paste API key → Save.
-
-Recording is blocked until a key is set (you’ll get a notification and Settings will open if you try without one).
-
-### 5. Set your global shortcut (important)
-
-This is the main way to dictate. Cosmic Scribe does **not** pick a key for you — you bind one in COSMIC:
-
-1. **Settings → Keyboard → Custom shortcuts** (or **Custom commands**).
-2. **Add** a new shortcut.
-3. **Name:** `Cosmic Scribe`
-4. **Command:** use the full path (most reliable):
-
-   ```bash
-   # copy yours:
-   readlink -f "$(which cosmic-scribe)"
-   ```
-
-   Example command field:
-
-   ```text
-   /home/you/.local/bin/cosmic-scribe --trigger
-   ```
-
-5. Assign a key combo you like (e.g. **Super+Shift+Space**).
-6. Save.
-
-**Full guide with troubleshooting:** [docs/SHORTCUT.md](docs/SHORTCUT.md)
-
-### 6. Test dictation
-
-1. Open any app with a text field.
-2. Press your shortcut → tray shows **red dot** → speak → press shortcut again.
-3. Text should appear in the field (or on the clipboard if you use clipboard mode).
-
-### From source (developers)
+**From git clone** (recommended):
 
 ```bash
 git clone https://github.com/erik-balfe/cosmic-scribe.git
 cd cosmic-scribe
-cargo build --release
-./target/release/cosmic-scribe --install
-./target/release/cosmic-scribe --configure
+./scripts/install-prod.sh
 ```
 
-Then complete **steps 5–6** above. See [CONTRIBUTING.md](CONTRIBUTING.md).
+**Homebrew** installs the daemon only — then run `./scripts/install-gui-prod.sh` from a clone for the app menu entry. Details: [docs/INSTALL.md](docs/INSTALL.md).
 
-### Upgrading from `voice-input`
+You should see the **tray mic** and **Cosmic Scribe** in the app menu.
 
-```bash
-cosmic-scribe --install    # migrates ~/.local/share/voice-input/ → cosmic-scribe/
-```
+### 3. API key
 
-Update your keyboard shortcut command to `cosmic-scribe --trigger`. Optional: `brew uninstall voice-input`.
+Open **Cosmic Scribe → Settings**, paste your [xAI API key](https://console.x.ai/), Save. Recording is blocked until a key is stored.
+
+### 4. Global shortcut (main workflow)
+
+1. **Settings → Keyboard → Custom shortcuts** → Add.
+2. **Name:** `Cosmic Scribe`
+3. **Command:** full path to `cosmic-scribe --trigger` (e.g. `~/.local/bin/cosmic-scribe --trigger`).
+4. Pick a combo (e.g. **Super+Shift+Space**).
+
+Step-by-step: [docs/SHORTCUT.md](docs/SHORTCUT.md)
+
+### 5. Dictate
+
+1. Focus any text field.
+2. Press your shortcut → tray capsule turns **red** → speak → shortcut again.
+3. Capsule turns **blue** while recognizing, then text appears in the field (or clipboard only if you chose that in Settings).
+
+### 6. When something goes wrong
+
+- **Bad take while recording** — tray right-click → **Cancel recording**, or shortcut again.
+- **Transcription stuck / network blip** — open **History**, select the entry, **Re-transcribe**. No re-recording needed.
+- **Missed paste** — **History** → copy an older transcript.
+
+## App window
+
+| Tray menu | Opens |
+|-----------|--------|
+| **History** | Past recordings — list, playback, copy, edit, re-transcribe |
+| **Settings** | API key, language, output mode, tray legend, optional AI correction |
+| **Quit** | Stops the background daemon |
+
+History files: `~/.local/share/cosmic-scribe/recordings/` (`.raw` audio, `.txt` transcript).
+
+**Output modes** ([details](docs/OUTPUT.md)):
+
+| Mode | Behavior |
+|------|----------|
+| **wtype** (default) | Clipboard + type into focused field |
+| **clipboard** | Clipboard only — paste yourself (terminals) |
+
+## Service commands (install / maintenance)
+
+Not needed for daily use — the tray daemon runs after `--install`:
+
+| Command | Purpose |
+|---------|---------|
+| `cosmic-scribe --status` | Daemon running? paths? |
+| `cosmic-scribe --stop` | Stop daemon |
+| `cosmic-scribe --uninstall` | Remove install (keep data) |
+| `cosmic-scribe --uninstall --purge` | Remove install + all local data |
 
 ## Uninstall
 
 ```bash
-cosmic-scribe --uninstall          # keep API key, recordings, settings
-cosmic-scribe --uninstall --purge  # delete ~/.local/share/cosmic-scribe/ too
-brew uninstall cosmic-scribe       # if installed via Homebrew
+cosmic-scribe --uninstall
+./scripts/uninstall-gui-prod.sh
+cosmic-scribe --uninstall --purge   # optional: delete all data
+brew uninstall cosmic-scribe        # if installed via Homebrew
 ```
 
-See `scripts/uninstall.sh` if the shell still points at a removed `~/.local/bin/cosmic-scribe`.
+Or `./scripts/uninstall.sh` — see [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Requirements
 
@@ -173,12 +133,13 @@ See `scripts/uninstall.sh` if the shell still points at a removed `~/.local/bin/
 |------|--------|
 | Desktop | COSMIC on Pop!_OS or Fedora, Wayland |
 | API | [xAI API key](https://console.x.ai/) |
-| Tools | `arecord`, `wl-clipboard`, `wtype` (default output mode), `libnotify` |
-| Command | `cosmic-scribe` |
+| Runtime tools | `arecord`, `wl-clipboard`, `wtype` (default mode), `libnotify` |
+| Build (from source GUI) | Rust, Node, WebKitGTK — [docs/INSTALL.md](docs/INSTALL.md) |
+| Binaries | `cosmic-scribe` (daemon); `cosmic-scribe-gui` (app window) |
 
 ## Privacy
 
-Microphone audio is sent to **xAI** for transcription. API keys and recording history stay **on your machine** (encrypted key storage). See [xAI's terms](https://x.ai/).
+Audio is sent to **xAI** for transcription. API keys and recording history stay **on your machine** (encrypted key storage). See [xAI terms](https://x.ai/).
 
 ## License
 
@@ -186,4 +147,4 @@ Microphone audio is sent to **xAI** for transcription. API keys and recording hi
 
 ---
 
-**Developers:** [CONTRIBUTING.md](CONTRIBUTING.md) · **All docs:** [docs/README.md](docs/README.md)
+**Developers:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Docs:** [docs/README.md](docs/README.md)

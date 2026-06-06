@@ -98,6 +98,37 @@
 </script>
 
 <form class="panel" onsubmit={save}>
+  <section class="tray-legend" aria-label="Tray microphone states">
+    <span class="legend-heading">Tray mic</span>
+    <p class="field-hint legend-intro">The panel icon shows what Cosmic Scribe is doing. Left-click to record when idle.</p>
+    <div class="legend-grid">
+      <div class="legend-item">
+        <svg class="mini-mic" viewBox="0 0 32 36" aria-hidden="true">
+          <rect class="capsule recording" x="10" y="1" width="12" height="17" rx="6" />
+          <path class="stand" d="M 9 18.5 Q 9 25.5 16 25.5 Q 23 25.5 23 18.5" />
+          <line class="stand" x1="16" y1="25.5" x2="16" y2="29.5" />
+          <line class="stand" x1="10" y1="33" x2="22" y2="33" />
+        </svg>
+        <div class="legend-text">
+          <strong>Recording</strong>
+          <span class="field-hint">Red capsule — microphone is on</span>
+        </div>
+      </div>
+      <div class="legend-item">
+        <svg class="mini-mic" viewBox="0 0 32 36" aria-hidden="true">
+          <rect class="capsule transcribing" x="10" y="1" width="12" height="17" rx="6" />
+          <path class="stand" d="M 9 18.5 Q 9 25.5 16 25.5 Q 23 25.5 23 18.5" />
+          <line class="stand" x1="16" y1="25.5" x2="16" y2="29.5" />
+          <line class="stand" x1="10" y1="33" x2="22" y2="33" />
+        </svg>
+        <div class="legend-text">
+          <strong>Recognizing</strong>
+          <span class="field-hint">Blue capsule — sending audio to xAI</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <label>
     <span>API Key</span>
     <input type="password" bind:value={apiKey} placeholder={hasKey ? '(stored)' : 'sk-...'} autocomplete="off">
@@ -134,6 +165,55 @@
 </form>
 
 <style>
+  .tray-legend {
+    margin-bottom: 20px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .legend-heading {
+    display: block;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .legend-intro { margin-bottom: 12px; }
+  .legend-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+  }
+  .legend-text strong {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .legend-text .field-hint { margin-top: 0; }
+  .mini-mic {
+    width: 28px;
+    height: 32px;
+    flex-shrink: 0;
+    display: block;
+  }
+  .mini-mic .capsule.recording { fill: #dc2828; }
+  .mini-mic .capsule.transcribing { fill: #378cff; }
+  .mini-mic .stand {
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   form label { display: block; margin-bottom: 16px; }
   form label > span:first-child {
     display: block;

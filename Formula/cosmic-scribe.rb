@@ -21,7 +21,8 @@ class CosmicScribe < Formula
 
         First-time setup:
           cosmic-scribe --install
-          cosmic-scribe --configure
+          # App window (History/Settings): clone repo and run scripts/install-gui-prod.sh
+          # API key: open Cosmic Scribe → Settings
 
         Update later:
           brew upgrade cosmic-scribe
@@ -35,7 +36,7 @@ class CosmicScribe < Formula
         Service: --start | --stop | --restart | --status
 
         Bind a global shortcut to: cosmic-scribe --trigger
-        Tray: mic icon → solid red dot while recording.
+        Tray: red capsule = recording, blue capsule = recognizing.
       EOS
     end
   end

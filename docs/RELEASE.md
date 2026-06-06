@@ -1,6 +1,6 @@
 # OSS release readiness
 
-Last reviewed: 2026-06-06
+Last reviewed: 2026-06-07
 
 **Docs:** [README.md](README.md) · [BACKLOG.md](BACKLOG.md)
 
@@ -10,11 +10,12 @@ Last reviewed: 2026-06-06
 |------|--------|-------|
 | Core loop | OK | Shortcut/tray → record → batch REST STT → wtype or clipboard (Settings) |
 | Daemon + IPC | OK | Unix socket toggle |
-| Tray (SNI) | OK | Idle / red dot recording / gray processing; cancel; History, Settings, Quit |
+| Tray (SNI) | OK | Idle (theme) / red capsule recording / blue capsule transcribing; cancel; History, Settings, Quit |
+| Tauri GUI | OK | `cosmic-scribe-gui` — app menu, History + Settings tabs |
 | API key storage | OK | AES-256-GCM, env override |
 | Recording history | OK | `.raw`, `.txt`, `.stt.json` (timestamps), `.json` (edits) under `~/.local/share/cosmic-scribe/recordings/` |
 | Web UI — list/detail | OK | Waveform, playback, edit versions, delete |
-| Tests | OK | 44 unit tests, recordings API regression |
+| Tests | OK | 54 unit tests, recordings API regression |
 | License | OK | MIT |
 
 ## Beta / WIP (label in UI + docs)
@@ -31,7 +32,7 @@ Last reviewed: 2026-06-06
 
 - [x] GitHub repo `erik-balfe/cosmic-scribe` (private); URLs point to cosmic-scribe
 - [x] GitHub private repo created + pushed (default branch `master`, full history with `erik.balfe@proton.me`)
-- [x] Tray screenshots in README (idle / recording / processing)
+- [x] Tray screenshots in README (idle / recording / recognizing)
 - [x] CI: `cargo fmt`, `clippy -D warnings`, `cargo test`, `cargo build --release`, `npm run lint`, `npm run build`
 - [x] Single history store: recordings directory only (removed unused `history.db`)
 - [x] Security note in README: API keys encrypted at rest, cloud STT sends audio to xAI (brief + honest)

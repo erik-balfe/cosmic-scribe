@@ -20,7 +20,9 @@ Formula: `Formula/cosmic-scribe.rb` in this repo (self-tap).
 brew tap erik-balfe/cosmic-scribe https://github.com/erik-balfe/cosmic-scribe
 brew install cosmic-scribe
 cosmic-scribe --install
-cosmic-scribe --configure
+# GUI (Tauri): from a git clone — see docs/INSTALL.md
+./scripts/install-gui-prod.sh
+# API key: Cosmic Scribe → Settings (or cosmic-scribe --configure)
 ```
 
 On each `v*` tag, [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs `scripts/update-formula.sh` to pin `url` + `sha256` on `master` and creates a GitHub Release.
@@ -52,7 +54,7 @@ See the main [README.md](../README.md) for the user-friendly quick start.
 ```bash
 cargo install --path . --locked
 cosmic-scribe --install
-cosmic-scribe --configure
+./scripts/install-gui-prod.sh   # Tauri window — needs WebKitGTK deps (INSTALL.md)
 ```
 
 ### 2. Homebrew tap (available)
@@ -76,7 +78,8 @@ See README for the honest motivation around why xAI STT + this architecture make
 ## Versioning
 
 - `0.1.0` — first public: core STT + history UI stable, correction beta
-- `0.2.0` — correction stable or removed; packaging (COPR minimum)
+- `0.2.0` — prod Tauri GUI, tray icon states, install docs
+- `0.3.0` — tray legend in Settings, INSTALL.md, README screenshots
 
 ## Release cadence
 

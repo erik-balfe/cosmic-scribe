@@ -8,7 +8,7 @@ cosmic-scribe --trigger
 
 That talks to the tray daemon over a local socket. The daemon must be running (`cosmic-scribe --install` starts it and enables login autostart).
 
-See also: [README Quick start](../README.md#quick-start-recommended) · [OUTPUT.md](OUTPUT.md)
+See also: [README Quick start](../README.md#quick-start) · [INSTALL.md](INSTALL.md) · [OUTPUT.md](OUTPUT.md)
 
 ---
 
@@ -82,9 +82,9 @@ Avoid combos already used by the desktop or other apps.
 ## 4. Test
 
 1. Focus any app with a text field (browser, editor, terminal).
-2. Press your shortcut once → tray icon should show **red dot** (recording).
+2. Press your shortcut once → tray capsule turns **red** (recording).
 3. Speak a short phrase.
-4. Press the shortcut again → icon turns **gray** (transcribing), then text appears (or lands on clipboard per [OUTPUT.md](OUTPUT.md)).
+4. Press the shortcut again → capsule turns **blue** (recognizing), then text appears (or lands on clipboard per [OUTPUT.md](OUTPUT.md)).
 
 If nothing happens:
 

@@ -125,6 +125,15 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if args.iter().any(|a| a == "--ui-server") {
+        let start_path = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--path="))
+            .unwrap_or("/");
+        std::env::set_var("COSMIC_SCRIBE_NO_BROWSER", "1");
+        return cosmic_scribe::web::run_at(start_path);
+    }
+
     if args.iter().any(|a| a == "--configure") {
         return configure_mode();
     }

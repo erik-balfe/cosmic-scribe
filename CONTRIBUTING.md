@@ -34,11 +34,10 @@ cd web && npm ci && npm run lint && npm run build
 ### Install for local testing
 
 ```bash
-./target/release/cosmic-scribe --install
-./target/release/cosmic-scribe --configure
+./scripts/install-prod.sh
 ```
 
-This puts the binary in `~/.local/bin` and sets up autostart.
+Installs daemon + Tauri GUI. API key: **Cosmic Scribe → Settings** (or `cosmic-scribe --configure`).
 
 Run the daemon directly for development:
 
@@ -109,18 +108,19 @@ Key design goals:
 
 See also [docs/README.md](docs/README.md) (doc index), [docs/STATE.md](docs/STATE.md), and [docs/BACKLOG.md](docs/BACKLOG.md).
 
-### Tauri GUI spike (`gui/`)
+### Tauri GUI (`gui/`)
 
-Native window prototype (replaces browser for History/Settings):
+Production app window for History/Settings (`cosmic-scribe-gui`):
 
 ```bash
-cd web && npm run build
-cd ../gui && cargo build
-cargo run -p cosmic-scribe-gui              # History
-cargo run -p cosmic-scribe-gui -- --settings # Settings
+./scripts/install-gui-prod.sh    # build + install to ~/.local/bin
+cosmic-scribe-gui                # History
+cosmic-scribe-gui --settings     # Settings
 ```
 
-Fedora: `sudo dnf install webkit2gtk4.1-devel`. See [docs/TAURI.md](docs/TAURI.md).
+Build deps: [docs/INSTALL.md](docs/INSTALL.md). Architecture notes: [docs/TAURI.md](docs/TAURI.md).
+
+Debug binary (does not replace prod): `./scripts/install-gui-debug.sh`
 
 ## Using jj (Jujutsu)
 
