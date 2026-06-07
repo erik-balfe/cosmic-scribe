@@ -54,6 +54,42 @@ fn gui_lock_path() -> PathBuf {
     data_dir().join("gui.lock")
 }
 
+fn daemon_lock_path() -> PathBuf {
+    std::env::var("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+        .join(format!("{APP_SLUG}-daemon.lock"))
+}
+
+/// Held for the lifetime of a `--daemon` process; released on drop.
+pub struct DaemonLockGuard;
+
+/// Returns `Err(pid)` when another daemon instance already owns the lock.
+pub fn try_acquire_daemon_lock() -> Result<DaemonLockGuard, u32> {
+    let path = daemon_lock_path();
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(pid) = raw.lines().next().unwrap_or("").trim().parse::<u32>() {
+            if process_alive(pid) {
+                return Err(pid);
+            }
+        }
+    }
+    let pid = std::process::id();
+    let _ = std::fs::write(&path, format!("{pid}\n"));
+    Ok(DaemonLockGuard)
+}
+
+pub fn release_daemon_lock() {
+    let path = daemon_lock_path();
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(lock_pid) = raw.lines().next().unwrap_or("").trim().parse::<u32>() {
+            if lock_pid == std::process::id() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+}
+
 pub fn gui_binary_path(debug: bool) -> PathBuf {
     let name = if debug {
         "cosmic-scribe-gui-debug"
@@ -433,6 +469,7 @@ pub fn stop_daemon() -> u32 {
     let sock = crate::ipc::socket_path();
     let _ = std::fs::remove_file(&sock);
     let _ = std::fs::remove_file(legacy_socket_path());
+    let _ = std::fs::remove_file(daemon_lock_path());
     let n = pids.len() as u32;
     eprintln!("Stopped {n} daemon process(es)");
     n

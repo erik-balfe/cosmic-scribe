@@ -11,7 +11,7 @@ use cosmic_scribe::traits::SttClient;
 use cosmic_scribe::traits::{KeyringStore, TrayController};
 use cosmic_scribe::tray;
 use cosmic_scribe::APP_SLUG;
-use ksni::TrayMethods;
+
 use std::sync::Arc;
 
 struct CliTray;
@@ -258,6 +258,14 @@ async fn record_once() -> anyhow::Result<()> {
 }
 
 async fn daemon_mode() -> anyhow::Result<()> {
+    let _daemon_lock = match lifecycle::try_acquire_daemon_lock() {
+        Ok(guard) => guard,
+        Err(pid) => {
+            tracing::info!("daemon already running (pid {pid})");
+            return Ok(());
+        }
+    };
+
     let keyring = Arc::new(ConfigFileKeyring);
     let stt: Arc<dyn SttClient> = Arc::new(XaiSttClient::new(keyring.clone()));
     let mut app = App::new(
@@ -271,7 +279,7 @@ async fn daemon_mode() -> anyhow::Result<()> {
     let tx = app.event_sender();
 
     let voice_tray = tray::VoiceTray::new(tx.clone());
-    let tray_handle = voice_tray.spawn().await?;
+    let tray_handle = tray::spawn_tray(voice_tray).await?;
     tokio::spawn(tray::watch_ui_theme(tray_handle.clone()));
 
     app.set_tray_controller(Box::new(TrayHandle::new(tray_handle)));
@@ -368,7 +376,9 @@ Name=Cosmic Scribe
 Exec={bin} --daemon
 Icon=audio-input-microphone
 Comment=Voice dictation for COSMIC via xAI Grok STT
+Terminal=false
 X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=3
 "#,
         bin = bin.display()
     );

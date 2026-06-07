@@ -7,7 +7,7 @@
 use crate::keyring;
 use crate::state::Event;
 use ksni::menu::StandardItem;
-use ksni::{Icon, MenuItem, Status, ToolTip, Tray};
+use ksni::{Icon, MenuItem, OfflineReason, Status, ToolTip, Tray, TrayMethods};
 use std::io::Cursor;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
@@ -191,6 +191,14 @@ impl VoiceTray {
     }
 }
 
+/// Spawn the tray, tolerating login-time races when StatusNotifierWatcher is not up yet.
+pub async fn spawn_tray(tray: VoiceTray) -> anyhow::Result<ksni::Handle<VoiceTray>> {
+    tray.assume_sni_available(true)
+        .spawn()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to spawn tray: {e}"))
+}
+
 impl Tray for VoiceTray {
     fn icon_pixmap(&self) -> Vec<Icon> {
         vec![
@@ -304,6 +312,15 @@ impl Tray for VoiceTray {
 
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.toggle_tx.send(Event::ToggleTray);
+    }
+
+    fn watcher_offline(&self, reason: OfflineReason) -> bool {
+        tracing::warn!("system tray watcher offline ({reason:?}); waiting for session");
+        false
+    }
+
+    fn watcher_online(&self) {
+        tracing::info!("system tray watcher online");
     }
 }
 
