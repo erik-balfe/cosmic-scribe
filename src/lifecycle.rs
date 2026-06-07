@@ -64,6 +64,12 @@ fn daemon_lock_path() -> PathBuf {
 /// Held for the lifetime of a `--daemon` process; released on drop.
 pub struct DaemonLockGuard;
 
+impl Drop for DaemonLockGuard {
+    fn drop(&mut self) {
+        release_daemon_lock();
+    }
+}
+
 /// Returns `Err(pid)` when another daemon instance already owns the lock.
 pub fn try_acquire_daemon_lock() -> Result<DaemonLockGuard, u32> {
     let path = daemon_lock_path();

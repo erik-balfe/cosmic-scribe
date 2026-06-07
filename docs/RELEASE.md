@@ -4,7 +4,7 @@ Last reviewed: 2026-06-07
 
 **Docs:** [README.md](README.md) · [BACKLOG.md](BACKLOG.md)
 
-## Stable (ship as 0.1.0)
+## Stable (v0.3.x)
 
 | Area | Status | Notes |
 |------|--------|-------|

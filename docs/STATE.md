@@ -18,7 +18,7 @@ Internal engineering log (not marketing copy). Keep in sync with `docs/KARAOKE.m
 - Unix socket IPC, AES-256-GCM API keys, language config
 - Tray SNI (Cosmic Scribe title); History + Settings → **cosmic-scribe-gui** (Tauri prod)
 - Web UI: history list, detail (waveform, versions, user edit, Copy + toast)
-- Lifecycle: `--install`, `--update`, `--start`, `--stop`, `--status`
+- Lifecycle: `--install`, `--update`, `--start`, `--stop`, `--status`; login autostart; daemon singleton lock
 - AI correction via OpenRouter (beta)
 
 ### Verified with real xAI API
