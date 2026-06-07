@@ -80,6 +80,7 @@ See README for the honest motivation around why xAI STT + this architecture make
 - `0.1.0` — first public: core STT + history UI stable, correction beta
 - `0.2.0` — prod Tauri GUI, tray icon states, install docs
 - `0.3.0` — tray legend in Settings, INSTALL.md, README screenshots
+- `0.3.1` — login autostart tray race, daemon singleton (one tray icon)
 
 ## Release cadence
 
