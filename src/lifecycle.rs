@@ -8,6 +8,7 @@ use std::process::Command;
 use crate::APP_SLUG;
 
 const LEGACY_SLUG: &str = "voice-input";
+const SYSTEMD_SERVICE: &str = "com.cosmic-scribe.service";
 
 pub fn share_binary() -> PathBuf {
     data_dir().join(APP_SLUG)
@@ -39,6 +40,11 @@ pub fn data_dir() -> PathBuf {
     dir
 }
 
+/// Append-only daemon / autostart debug log (`RUST_LOG` still controls verbosity).
+pub fn daemon_log_path() -> PathBuf {
+    data_dir().join("daemon.log")
+}
+
 pub fn recordings_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("COSMIC_SCRIBE_RECORDINGS_DIR") {
         let dir = PathBuf::from(dir);
@@ -54,7 +60,7 @@ fn gui_lock_path() -> PathBuf {
     data_dir().join("gui.lock")
 }
 
-fn daemon_lock_path() -> PathBuf {
+pub fn daemon_lock_path() -> PathBuf {
     std::env::var("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/tmp"))
@@ -449,7 +455,125 @@ pub fn is_daemon_running() -> bool {
     !daemon_pids().is_empty()
 }
 
+fn systemctl_user(args: &[&str]) -> bool {
+    Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+pub fn systemd_service_file() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("systemd/user")
+        .join(SYSTEMD_SERVICE)
+}
+
+pub fn systemd_service_installed() -> bool {
+    systemd_service_file().is_file()
+}
+
+/// Remove legacy XDG autostart / COSMIC drop-in artifacts (pre-0.3.2).
+pub fn remove_legacy_autostart() {
+    for path in [autostart_desktop_file(), legacy_autostart_desktop_file()] {
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+            tracing::info!("removed legacy autostart desktop: {}", path.display());
+        }
+    }
+    remove_autostart_systemd_dropin();
+}
+
+fn render_systemd_unit(exec: &Path) -> String {
+    format!(
+        r#"[Unit]
+Description=Cosmic Scribe voice dictation daemon
+Documentation=https://github.com/erik-balfe/cosmic-scribe
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart={} --daemon
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=mixed
+PassEnvironment=WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY DBUS_SESSION_BUS_ADDRESS
+
+[Install]
+WantedBy=graphical-session.target
+"#,
+        exec.display()
+    )
+}
+
+fn ensure_systemd_enabled() {
+    let _ = systemctl_user(&["daemon-reload"]);
+    let _ = systemctl_user(&["enable", "--now", SYSTEMD_SERVICE]);
+}
+
+/// Install user unit (same pattern as cosmic-paste): start after graphical session is up.
+pub fn install_systemd_service() -> anyhow::Result<()> {
+    remove_legacy_autostart();
+    let bin = daemon_binary();
+    if !bin.exists() {
+        anyhow::bail!(
+            "No installed binary at {}. Run: {APP_SLUG} --install",
+            bin.display()
+        );
+    }
+    let path = systemd_service_file();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, render_systemd_unit(&bin))?;
+    systemctl_user(&["daemon-reload"]);
+    Ok(())
+}
+
+fn login_autostart_configured() -> bool {
+    systemd_service_installed()
+}
+
+/// Re-install the systemd unit when the user already opted into login autostart.
+pub fn refresh_login_autostart_if_configured() -> anyhow::Result<()> {
+    if login_autostart_configured() {
+        enable_login_autostart()?;
+    }
+    Ok(())
+}
+
+/// Login autostart: `com.cosmic-scribe.service` on `graphical-session.target` (cosmic-paste pattern).
+pub fn enable_login_autostart() -> anyhow::Result<()> {
+    install_systemd_service()?;
+    ensure_systemd_enabled();
+    eprintln!("Login autostart enabled ({SYSTEMD_SERVICE})");
+    Ok(())
+}
+
+pub fn disable_login_autostart() {
+    let _ = systemctl_user(&["disable", "--now", SYSTEMD_SERVICE]);
+    let path = systemd_service_file();
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+    }
+    let _ = systemctl_user(&["daemon-reload"]);
+    remove_legacy_autostart();
+}
+
 pub fn stop_daemon() -> u32 {
+    if systemd_service_installed() {
+        let _ = systemctl_user(&["stop", SYSTEMD_SERVICE]);
+        for _ in 0..30 {
+            if daemon_pids().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
     let pids = daemon_pids();
     if pids.is_empty() {
         return 0;
@@ -493,6 +617,13 @@ pub fn start_daemon() -> anyhow::Result<()> {
         eprintln!("Daemon already running");
         return Ok(());
     }
+    if systemd_service_installed() {
+        if !systemctl_user(&["start", SYSTEMD_SERVICE]) {
+            anyhow::bail!("systemctl --user start {SYSTEMD_SERVICE} failed");
+        }
+        eprintln!("Daemon started ({SYSTEMD_SERVICE})");
+        return Ok(());
+    }
     Command::new(&bin)
         .arg("--daemon")
         .stdin(std::process::Stdio::null())
@@ -533,12 +664,64 @@ pub fn print_status() {
         sock.display(),
         if sock.exists() { "present" } else { "absent" }
     );
+    let lock = daemon_lock_path();
+    eprintln!(
+        "  daemon lock: {} ({})",
+        lock.display(),
+        if lock.exists() { "present" } else { "absent" }
+    );
+    if lock.exists() {
+        if let Ok(raw) = std::fs::read_to_string(&lock) {
+            let pid = raw.lines().next().unwrap_or("").trim();
+            eprintln!("    lock pid: {pid}");
+        }
+    }
+    let log = daemon_log_path();
+    eprintln!(
+        "  daemon log: {} ({})",
+        log.display(),
+        if log.exists() { "present" } else { "absent" }
+    );
+    if log.exists() {
+        if let Ok(meta) = log.metadata() {
+            eprintln!("    log size: {} bytes", meta.len());
+        }
+    }
+    let unit = systemd_service_file();
+    eprintln!(
+        "  systemd unit: {} ({})",
+        unit.display(),
+        if unit.exists() { "present" } else { "absent" }
+    );
+    let desktop = autostart_desktop_file();
+    if desktop.exists() {
+        eprintln!(
+            "  legacy autostart desktop: {} (stale — run --install or --autostart to remove)",
+            desktop.display()
+        );
+    }
+    if unit.exists() {
+        for (label, args) in [
+            ("active", vec!["is-active", SYSTEMD_SERVICE]),
+            ("enabled", vec!["is-enabled", SYSTEMD_SERVICE]),
+        ] {
+            let mut cmd = Command::new("systemctl");
+            cmd.arg("--user").args(&args);
+            if let Ok(out) = cmd.output() {
+                let state = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !state.is_empty() {
+                    eprintln!("    {label}: {state}");
+                }
+            }
+        }
+    }
 }
 
 pub fn update_from(args: &[String]) -> anyhow::Result<()> {
     let source = resolve_update_source(args)?;
     stop_daemon();
     install_binary_from(&source)?;
+    refresh_login_autostart_if_configured()?;
     start_daemon()?;
     Ok(())
 }
@@ -553,6 +736,20 @@ pub fn autostart_desktop_file() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("autostart")
         .join(format!("{APP_SLUG}.desktop"))
+}
+
+fn autostart_systemd_dropin_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("systemd/user/app-cosmic\\x2dscribe@autostart.service.d")
+}
+
+fn remove_autostart_systemd_dropin() {
+    let dir = autostart_systemd_dropin_dir();
+    if dir.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = systemctl_user(&["daemon-reload"]);
+    }
 }
 
 /// Remove daemon install (wrapper, share copy, autostart, IPC socket).
@@ -598,6 +795,7 @@ pub fn uninstall(purge: bool) -> anyhow::Result<()> {
         std::fs::remove_file(&autostart)?;
         eprintln!("Removed: {}", autostart.display());
     }
+    disable_login_autostart();
 
     if sock.exists() {
         std::fs::remove_file(&sock)?;
@@ -658,5 +856,19 @@ mod tests {
         assert!(!looks_like_debug_build(&PathBuf::from(format!(
             "/home/u/proj/target/release/{APP_SLUG}"
         ))));
+    }
+
+    #[test]
+    fn systemd_unit_matches_cosmic_paste_pattern() {
+        let unit = render_systemd_unit(&PathBuf::from("/home/u/.local/bin/cosmic-scribe"));
+        assert!(unit.contains("After=graphical-session.target"));
+        assert!(unit.contains("WantedBy=graphical-session.target"));
+        assert!(!unit.contains("WantedBy=default.target"));
+        assert!(!unit.contains("ExecStartPre"));
+        assert!(unit.contains("ExecStart=/home/u/.local/bin/cosmic-scribe --daemon"));
+        assert!(unit.contains(
+            "PassEnvironment=WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY DBUS_SESSION_BUS_ADDRESS"
+        ));
+        assert!(unit.contains("Restart=on-failure"));
     }
 }

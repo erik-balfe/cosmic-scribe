@@ -35,3 +35,10 @@ done
 
 cp -f "$ICON_DIR/128x128.png" "$ICON_DIR/icon.png"
 echo "wrote $ICON_DIR/icon.png"
+
+ASSETS="$ROOT/assets"
+mkdir -p "$ASSETS"
+cp -f "$ICON_DIR/icon.svg" "$ASSETS/logo.svg"
+cp -f "$ICON_DIR/128x128.png" "$ASSETS/logo.png"
+cp -f "$ICON_DIR/256x256.png" "$ASSETS/logo-256.png"
+echo "wrote $ASSETS/logo.{svg,png} and logo-256.png"

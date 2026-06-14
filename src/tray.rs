@@ -4,12 +4,13 @@
 // Right click: menu with Cancel, Settings, Quit.
 // Mic-only icon: recording = red capsule; transcribing = blue capsule; idle = theme colors.
 
-use crate::keyring;
 use crate::state::Event;
+use crate::traits::TrayController;
 use ksni::menu::StandardItem;
 use ksni::{Icon, MenuItem, OfflineReason, Status, ToolTip, Tray, TrayMethods};
 use std::io::Cursor;
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 pub use crate::tray_theme::ui_prefers_dark;
@@ -23,7 +24,7 @@ fn rgba_to_argb(rgba: &mut [u8]) {
 
 const RED: (u8, u8, u8) = (220, 40, 40);
 const BLUE: (u8, u8, u8) = (55, 140, 255);
-const GREEN: (u8, u8, u8) = (60, 170, 60);
+
 const MIC_LIGHT: (u8, u8, u8) = (238, 241, 248); // #eef1f8 on dark panels
 const MIC_DARK: (u8, u8, u8) = (26, 34, 56); // #1a2238 on light panels
 
@@ -105,8 +106,7 @@ fn paint_mask(pixels: &mut [u8], mask: &[u8], color: (u8, u8, u8)) {
 fn capsule_color(state: &str, dark_ui: bool) -> (u8, u8, u8) {
     match state {
         "recording" | "error" => RED,
-        "transcribing" => BLUE,
-        "inserting" => GREEN,
+        "transcribing" | "inserting" => BLUE,
         _ => mic_color(dark_ui),
     }
 }
@@ -191,12 +191,104 @@ impl VoiceTray {
     }
 }
 
-/// Spawn the tray, tolerating login-time races when StatusNotifierWatcher is not up yet.
-pub async fn spawn_tray(tray: VoiceTray) -> anyhow::Result<ksni::Handle<VoiceTray>> {
+fn tray_startup_race(err: &str) -> bool {
+    err.contains("StatusNotifierWatcher")
+        || err.contains("not activatable")
+        || err.contains("ServiceUnknown")
+}
+
+async fn try_spawn_tray(tray: VoiceTray) -> anyhow::Result<ksni::Handle<VoiceTray>> {
     tray.assume_sni_available(true)
         .spawn()
         .await
         .map_err(|e| anyhow::anyhow!("failed to spawn tray: {e}"))
+}
+
+/// Tray updates are no-ops until [`connect_tray_background`] installs a handle.
+pub struct DeferredTray {
+    handle: Arc<Mutex<Option<ksni::Handle<VoiceTray>>>>,
+}
+
+impl Default for DeferredTray {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DeferredTray {
+    pub fn new() -> Self {
+        Self {
+            handle: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn slot(&self) -> Arc<Mutex<Option<ksni::Handle<VoiceTray>>>> {
+        self.handle.clone()
+    }
+}
+
+impl TrayController for DeferredTray {
+    fn set_state(&self, state: &str) {
+        let Ok(guard) = self.handle.lock() else {
+            return;
+        };
+        let Some(handle) = guard.as_ref() else {
+            return;
+        };
+        let state = state.to_string();
+        let handle = handle.clone();
+        tokio::spawn(async move {
+            let _ = handle
+                .update(move |tray: &mut VoiceTray| tray.set_state(&state))
+                .await;
+        });
+    }
+}
+
+/// Connect tray in the background; daemon IPC can run before the panel is ready.
+pub async fn connect_tray_background(
+    toggle_tx: mpsc::UnboundedSender<Event>,
+    slot: Arc<Mutex<Option<ksni::Handle<VoiceTray>>>>,
+) {
+    use std::time::Duration;
+
+    const RETRY_DELAY: Duration = Duration::from_secs(5);
+    let mut attempt = 0u32;
+
+    loop {
+        attempt += 1;
+        let tray = VoiceTray::new(toggle_tx.clone());
+        match try_spawn_tray(tray).await {
+            Ok(handle) => {
+                let theme_handle = handle.clone();
+                tokio::spawn(watch_ui_theme(theme_handle));
+                if let Ok(mut guard) = slot.lock() {
+                    *guard = Some(handle);
+                }
+                if attempt > 1 {
+                    tracing::info!("system tray connected after {attempt} attempts");
+                } else {
+                    tracing::info!("system tray connected");
+                }
+                return;
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if tray_startup_race(&msg) {
+                    tracing::warn!(
+                        "StatusNotifierWatcher not ready (attempt {attempt}), retry in {}s",
+                        RETRY_DELAY.as_secs()
+                    );
+                } else {
+                    tracing::warn!(
+                        "tray spawn failed (attempt {attempt}), retry in {}s: {e}",
+                        RETRY_DELAY.as_secs()
+                    );
+                }
+                tokio::time::sleep(RETRY_DELAY).await;
+            }
+        }
+    }
 }
 
 impl Tray for VoiceTray {
@@ -209,7 +301,7 @@ impl Tray for VoiceTray {
 
     fn status(&self) -> Status {
         match self.state.as_str() {
-            "recording" | "transcribing" => Status::Active,
+            "recording" | "transcribing" | "inserting" => Status::Active,
             _ => Status::Passive,
         }
     }
@@ -229,14 +321,7 @@ impl Tray for VoiceTray {
     fn tool_tip(&self) -> ToolTip {
         let desc = match self.state.as_str() {
             "recording" => "Recording — click to stop",
-            "transcribing" => "Transcribing...",
-            "inserting" => {
-                if keyring::get_output_mode() == "clipboard" {
-                    "Copied to clipboard — paste into your field"
-                } else {
-                    "Inserting text..."
-                }
-            }
+            "transcribing" | "inserting" => "Transcribing...",
             "error" => "Error — click to dismiss",
             _ => "Cosmic Scribe — click to record",
         };
@@ -348,6 +433,13 @@ mod tests {
         let icon = build_icon_sized("transcribing", true, 22);
         let (r, g, b) = capsule_center_argb(&icon);
         assert!(b > 200 && r < 120, "blue capsule, got r={r} g={g} b={b}");
+    }
+
+    #[test]
+    fn inserting_capsule_matches_transcribing_blue() {
+        let inserting = build_icon_sized("inserting", true, 22);
+        let transcribing = build_icon_sized("transcribing", true, 22);
+        assert_eq!(inserting.data, transcribing.data);
     }
 
     #[test]

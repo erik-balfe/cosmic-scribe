@@ -11,6 +11,7 @@ Internal and user-adjacent docs. The main [README](../README.md) is the public l
 | [SCREENSHOTS.md](SCREENSHOTS.md) | README / release screenshots (seed data + capture guide) |
 | [SHORTCUT.md](SHORTCUT.md) | **Global keyboard shortcut** (`cosmic-scribe --trigger`) on COSMIC |
 | [OUTPUT.md](OUTPUT.md) | Clipboard vs wtype output modes |
+| [BRANDING.md](BRANDING.md) | Name disclaimer, official icon, STT roadmap |
 
 ## Engineering
 

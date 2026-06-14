@@ -104,6 +104,18 @@
     <div class="legend-grid">
       <div class="legend-item">
         <svg class="mini-mic" viewBox="0 0 32 36" aria-hidden="true">
+          <rect class="capsule idle" x="10" y="1" width="12" height="17" rx="6" />
+          <path class="stand" d="M 9 18.5 Q 9 25.5 16 25.5 Q 23 25.5 23 18.5" />
+          <line class="stand" x1="16" y1="25.5" x2="16" y2="29.5" />
+          <line class="stand" x1="10" y1="33" x2="22" y2="33" />
+        </svg>
+        <div class="legend-text">
+          <strong>Idle</strong>
+          <span class="field-hint">Theme capsule — ready to record</span>
+        </div>
+      </div>
+      <div class="legend-item">
+        <svg class="mini-mic" viewBox="0 0 32 36" aria-hidden="true">
           <rect class="capsule recording" x="10" y="1" width="12" height="17" rx="6" />
           <path class="stand" d="M 9 18.5 Q 9 25.5 16 25.5 Q 23 25.5 23 18.5" />
           <line class="stand" x1="16" y1="25.5" x2="16" y2="29.5" />
@@ -123,7 +135,7 @@
         </svg>
         <div class="legend-text">
           <strong>Recognizing</strong>
-          <span class="field-hint">Blue capsule — sending audio to xAI</span>
+          <span class="field-hint">Blue capsule — transcribing and pasting</span>
         </div>
       </div>
     </div>
@@ -205,8 +217,10 @@
     flex-shrink: 0;
     display: block;
   }
+  .mini-mic .capsule.idle { fill: var(--text); }
   .mini-mic .capsule.recording { fill: #dc2828; }
   .mini-mic .capsule.transcribing { fill: #378cff; }
+
   .mini-mic .stand {
     fill: none;
     stroke: var(--text);

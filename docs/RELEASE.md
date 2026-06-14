@@ -1,6 +1,6 @@
 # OSS release readiness
 
-Last reviewed: 2026-06-07
+Last reviewed: 2026-06-14
 
 **Docs:** [README.md](README.md) · [BACKLOG.md](BACKLOG.md)
 
@@ -9,8 +9,8 @@ Last reviewed: 2026-06-07
 | Area | Status | Notes |
 |------|--------|-------|
 | Core loop | OK | Shortcut/tray → record → batch REST STT → wtype or clipboard (Settings) |
-| Daemon + IPC | OK | Unix socket toggle |
-| Tray (SNI) | OK | Idle (theme) / red capsule recording / blue capsule transcribing; cancel; History, Settings, Quit |
+| Daemon + IPC | OK | Unix socket toggle; `com.cosmic-scribe.service` login autostart |
+| Tray (SNI) | OK | Idle / red recording / blue processing; cancel; History, Settings, Quit |
 | Tauri GUI | OK | `cosmic-scribe-gui` — app menu, History + Settings tabs |
 | API key storage | OK | AES-256-GCM, env override |
 | Recording history | OK | `.raw`, `.txt`, `.stt.json` (timestamps), `.json` (edits) under `~/.local/share/cosmic-scribe/recordings/` |

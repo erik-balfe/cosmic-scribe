@@ -23,9 +23,13 @@ impl TrayController for CliTray {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    logging::init();
-    check_deps();
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--daemon") {
+        logging::init_daemon();
+    } else {
+        logging::init();
+    }
+    check_deps();
 
     if args.iter().any(|a| a == "--set-key") {
         let key = args
@@ -162,17 +166,19 @@ fn print_usage() {
     eprintln!("Cosmic Scribe — record → Grok STT → insert text (wtype or clipboard)");
     eprintln!();
     eprintln!("Service (background daemon + tray):");
-    eprintln!("  --install            Stop daemon, install binary, autostart, start");
+    eprintln!(
+        "  --install            Stop daemon, install binary, enable systemd autostart, start"
+    );
     eprintln!("  --install-from=PATH  Install from PATH (default: release/cargo if newer)");
     eprintln!("  --update             Stop → install from this binary → start");
     eprintln!("  --update-from=PATH   Same, but copy from PATH (e.g. new release build)");
-    eprintln!("  --start              Start daemon if stopped");
+    eprintln!("  --start              Start daemon via systemd (or direct if not installed)");
     eprintln!("  --stop | --quit      Stop daemon (tray goes away)");
     eprintln!("  --restart            Stop then start daemon");
     eprintln!("  --status             Running? installed path? IPC socket?");
     eprintln!("  --uninstall          Stop daemon; remove ~/.local install + autostart");
     eprintln!("  --purge              With --uninstall: also delete ~/.local/share/{APP_SLUG}/");
-    eprintln!("  --daemon             Run in foreground (used by --start; not for daily use)");
+    eprintln!("  --daemon             Run in foreground (used by systemd unit; not for daily use)");
     eprintln!();
     eprintln!("Dictation:");
     eprintln!("  --trigger            Toggle recording on running daemon");
@@ -183,7 +189,7 @@ fn print_usage() {
     eprintln!("  --configure          Interactive API key + language");
     eprintln!("  --history            Tauri window — recording history");
     eprintln!("  --settings           Tauri window — API key, language, output mode");
-    eprintln!("  --autostart          Enable login autostart only");
+    eprintln!("  --autostart          Enable com.cosmic-scribe.service (graphical-session.target)");
     eprintln!("  --set-key KEY        Store xAI API key");
     eprintln!("  --clear-key          Remove stored API key");
     eprintln!("  --set-lang LANG      Set STT language (default: en)");
@@ -258,10 +264,27 @@ async fn record_once() -> anyhow::Result<()> {
 }
 
 async fn daemon_mode() -> anyhow::Result<()> {
+    tracing::info!(
+        pid = std::process::id(),
+        exe = ?std::env::current_exe().ok(),
+        xdg_runtime = ?std::env::var("XDG_RUNTIME_DIR").ok(),
+        desktop_session = ?std::env::var("DESKTOP_SESSION").ok(),
+        wayland_display = ?std::env::var("WAYLAND_DISPLAY").ok(),
+        "daemon_mode entered"
+    );
+
+    let lock_path = lifecycle::daemon_lock_path();
     let _daemon_lock = match lifecycle::try_acquire_daemon_lock() {
-        Ok(guard) => guard,
+        Ok(guard) => {
+            tracing::info!(lock = %lock_path.display(), "daemon lock acquired");
+            guard
+        }
         Err(pid) => {
-            tracing::info!("daemon already running (pid {pid})");
+            tracing::info!(
+                existing_pid = pid,
+                lock = %lock_path.display(),
+                "daemon already running — exiting (singleton)"
+            );
             return Ok(());
         }
     };
@@ -278,51 +301,35 @@ async fn daemon_mode() -> anyhow::Result<()> {
 
     let tx = app.event_sender();
 
-    let voice_tray = tray::VoiceTray::new(tx.clone());
-    let tray_handle = tray::spawn_tray(voice_tray).await?;
-    tokio::spawn(tray::watch_ui_theme(tray_handle.clone()));
-
-    app.set_tray_controller(Box::new(TrayHandle::new(tray_handle)));
+    let deferred = tray::DeferredTray::new();
+    let tray_slot = deferred.slot();
+    app.set_tray_controller(Box::new(deferred));
 
     let ipc_tx = tx.clone();
     tokio::spawn(ipc::spawn_listener(ipc_tx));
+    tracing::info!("IPC listener task spawned");
+
+    let tray_tx = tx.clone();
+    tokio::spawn(tray::connect_tray_background(tray_tx, tray_slot));
+    tracing::info!("tray connect task spawned (retries until panel ready)");
 
     tracing::info!(
         "Cosmic Scribe daemon — use '{APP_SLUG} --trigger', tray click, or Ctrl+C to stop"
     );
 
-    tokio::select! {
-        _ = app.run() => {},
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("shutting down");
+    let shutdown = tokio::select! {
+        () = app.run() => {
+            tracing::warn!("app.run() returned unexpectedly");
+            "app_exit"
         }
-    }
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("shutting down (Ctrl+C)");
+            "signal"
+        }
+    };
+    tracing::info!(reason = shutdown, "daemon exiting");
 
     Ok(())
-}
-
-struct TrayHandle {
-    handle: ksni::Handle<tray::VoiceTray>,
-}
-
-impl TrayHandle {
-    fn new(handle: ksni::Handle<tray::VoiceTray>) -> Self {
-        Self { handle }
-    }
-}
-
-impl TrayController for TrayHandle {
-    fn set_state(&self, state: &str) {
-        let state = state.to_string();
-        let handle = self.handle.clone();
-        tokio::spawn(async move {
-            let _ = handle
-                .update(move |tray: &mut tray::VoiceTray| {
-                    tray.set_state(&state);
-                })
-                .await;
-        });
-    }
 }
 
 fn configure_mode() -> anyhow::Result<()> {
@@ -364,27 +371,7 @@ fn configure_mode() -> anyhow::Result<()> {
 }
 
 fn create_autostart() -> anyhow::Result<()> {
-    let path = lifecycle::autostart_desktop_file();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let bin = lifecycle::daemon_binary();
-    let desktop = format!(
-        r#"[Desktop Entry]
-Type=Application
-Name=Cosmic Scribe
-Exec={bin} --daemon
-Icon=audio-input-microphone
-Comment=Voice dictation for COSMIC via xAI Grok STT
-Terminal=false
-X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Delay=3
-"#,
-        bin = bin.display()
-    );
-    std::fs::write(&path, desktop)?;
-    eprintln!("Autostart enabled: will start on login");
-    Ok(())
+    lifecycle::enable_login_autostart()
 }
 
 fn check_deps() {

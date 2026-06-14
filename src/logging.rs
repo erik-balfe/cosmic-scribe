@@ -81,11 +81,69 @@ impl LogCtx {
     }
 }
 
+fn env_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+}
+
 pub fn init() {
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
+        .with_env_filter(env_filter())
+        .with_ansi(true)
         .init();
+}
+
+#[derive(Clone)]
+struct DaemonLogWriter(std::sync::Arc<std::sync::Mutex<std::fs::File>>);
+
+struct DaemonLogWriterGuard(std::sync::Arc<std::sync::Mutex<std::fs::File>>);
+
+impl std::io::Write for DaemonLogWriterGuard {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).flush()
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::writer::MakeWriter<'a> for DaemonLogWriter {
+    type Writer = DaemonLogWriterGuard;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        DaemonLogWriterGuard(self.0.clone())
+    }
+}
+
+/// Daemon mode: append to `~/.local/share/cosmic-scribe/daemon.log` (survives null stderr).
+pub fn init_daemon() {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let path = crate::lifecycle::daemon_log_path();
+    let file = OpenOptions::new().create(true).append(true).open(&path);
+
+    match file {
+        Ok(mut f) => {
+            let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            let _ = writeln!(
+                f,
+                "\n=== daemon start {ts} pid={} ppid={} ===",
+                std::process::id(),
+                std::env::var("PPID").unwrap_or_else(|_| "?".into())
+            );
+            let writer = DaemonLogWriter(std::sync::Arc::new(std::sync::Mutex::new(f)));
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter())
+                .with_ansi(false)
+                .with_writer(writer)
+                .init();
+            info!(log = %path.display(), "daemon logging to file");
+        }
+        Err(e) => {
+            eprintln!("daemon log unavailable ({}): {e}", path.display());
+            init();
+        }
+    }
 }

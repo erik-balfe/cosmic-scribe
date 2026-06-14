@@ -6,7 +6,7 @@ Cosmic Scribe is meant to be used with a **system-wide shortcut**: press once to
 cosmic-scribe --trigger
 ```
 
-That talks to the tray daemon over a local socket. The daemon must be running (`cosmic-scribe --install` starts it and enables login autostart).
+That talks to the tray daemon over a local socket. The daemon must be running (`cosmic-scribe --install` installs the binary and enables `com.cosmic-scribe.service` on login).
 
 See also: [README Quick start](../README.md#quick-start) · [INSTALL.md](INSTALL.md) · [OUTPUT.md](OUTPUT.md)
 
@@ -84,7 +84,7 @@ Avoid combos already used by the desktop or other apps.
 1. Focus any app with a text field (browser, editor, terminal).
 2. Press your shortcut once → tray capsule turns **red** (recording).
 3. Speak a short phrase.
-4. Press the shortcut again → capsule turns **blue** (recognizing), then text appears (or lands on clipboard per [OUTPUT.md](OUTPUT.md)).
+4. Press the shortcut again → capsule turns **blue** until text is ready, then idle (or lands on clipboard per [OUTPUT.md](OUTPUT.md)).
 
 If nothing happens:
 

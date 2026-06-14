@@ -6,7 +6,7 @@ End-to-end setup for **Cosmic Scribe** on Fedora / Pop!_OS with the COSMIC deskt
 
 | Component | After install |
 |-----------|----------------|
-| **Tray daemon** | `cosmic-scribe` — mic in the panel, records + transcribes |
+| **Tray daemon** | `cosmic-scribe` — mic in the panel, records + transcribes; autostart via `com.cosmic-scribe.service` |
 | **App window** | `cosmic-scribe-gui` — **Cosmic Scribe** in the app menu (History + Settings) |
 
 Both are required for the intended workflow. Homebrew installs the **daemon binary only**; the GUI is installed from a git clone (see below).
@@ -59,7 +59,8 @@ This builds the release daemon, runs `cosmic-scribe --install`, builds **cosmic-
 Verify:
 
 ```bash
-cosmic-scribe --status          # daemon: running
+cosmic-scribe --status          # daemon: running, systemd unit present
+systemctl --user is-enabled com.cosmic-scribe.service
 test -x ~/.local/bin/cosmic-scribe-gui && echo "GUI OK"
 ```
 
@@ -103,7 +104,7 @@ CLI alternative: `cosmic-scribe --configure` (terminal only).
 |-------|---------------|---------|
 | Idle | Theme (white/dark) | Ready — click tray or use shortcut |
 | **Recording** | **Red** | Microphone is on — speak now |
-| **Recognizing** | **Blue** | Audio sent to xAI — wait a few seconds |
+| **Recognizing** | **Blue** | Transcribing and pasting — until done |
 
 Also shown in **Settings** in the app window.
 
@@ -140,7 +141,8 @@ Or: `./scripts/uninstall.sh` (finds brew or `~/.local` binary).
 
 | Problem | Check |
 |---------|--------|
-| No tray icon | `cosmic-scribe --status` · `cosmic-scribe --start` |
+| No tray icon after login | `cosmic-scribe --status` · `systemctl --user status com.cosmic-scribe.service` · `cosmic-scribe --start` |
+| Daemon not running after reboot | Re-run `cosmic-scribe --install` or `--autostart` · `systemctl --user is-enabled com.cosmic-scribe.service` |
 | No app in menu | `./scripts/install-gui-prod.sh` · log out/in or restart panel |
 | GUI build fails | Tauri deps in §2 · `pkg-config --exists glib-2.0` |
 | Recording silent | `arecord -l` · microphone permissions |

@@ -4,7 +4,7 @@ Task tracker for bugs, features, and research. Update status as work progresses.
 
 **Statuses:** `open` · `in_progress` · `done` · `deferred`
 
-Last updated: 2026-06-06
+Last updated: 2026-06-07
 
 **Doc index:** [docs/README.md](README.md)
 
@@ -29,6 +29,7 @@ Last updated: 2026-06-06
 | F4 | **done** | Tray History vs Settings open correct routes | `--history` and `--settings` |
 | F6 | **done** | README + shortcut setup docs for users | [SHORTCUT.md](SHORTCUT.md) + README Quick start |
 | F5 | open | Fedora COPR / packaged binary | `docs/DISTRIBUTION.md` |
+| F7 | open | Pluggable STT providers (user picks backend) | Today: xAI only via `SttClient`; see [BRANDING.md](BRANDING.md) |
 
 ---
 

@@ -1,6 +1,6 @@
 # STATE — Cosmic Scribe
 
-Last updated: 2026-06-07
+Last updated: 2026-06-14
 
 **Docs index:** [`docs/README.md`](README.md) · **Tasks:** [`docs/BACKLOG.md`](BACKLOG.md) · **Shortcut:** [`docs/SHORTCUT.md`](SHORTCUT.md) · **Tauri:** [`docs/TAURI.md`](TAURI.md)
 
@@ -12,13 +12,13 @@ Internal engineering log (not marketing copy). Keep in sync with `docs/KARAOKE.m
 - Pure state machine: Idle / Recording / Transcribing / Inserting / Error
 - IO behind traits — **44+ tests**
 - **Batch REST** xAI STT (`POST /v1/stt`) — full file after stop, not WebSocket streaming
-- STT retry + timeout; tray capsule: red = recording, blue = transcribing; ignore tray click during STT
+- STT retry + timeout; tray capsule: red = recording, blue = processing (STT + paste); ignore tray click during STT/insert
 - **Text output**: wtype default (`docs/OUTPUT.md`); optional clipboard-only in Settings
 - Per-recording artifacts: `.raw`, `.txt`, **`.stt.json`** (word timestamps + raw API JSON)
 - Unix socket IPC, AES-256-GCM API keys, language config
 - Tray SNI (Cosmic Scribe title); History + Settings → **cosmic-scribe-gui** (Tauri prod)
 - Web UI: history list, detail (waveform, versions, user edit, Copy + toast)
-- Lifecycle: `--install`, `--update`, `--start`, `--stop`, `--status`; login autostart; daemon singleton lock
+- Lifecycle: `--install`, `--update`, `--start`, `--stop`, `--status`; login autostart via `com.cosmic-scribe.service` on `graphical-session.target` (cosmic-paste pattern); daemon singleton lock; deferred tray connect
 - AI correction via OpenRouter (beta)
 
 ### Verified with real xAI API

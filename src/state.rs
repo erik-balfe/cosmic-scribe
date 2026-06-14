@@ -91,11 +91,7 @@ pub fn transition(state: &AppState, event: &Event) -> (AppState, Vec<Command>) {
             let t = text.clone();
             (
                 Inserting,
-                vec![
-                    CopyToClipboard(t.clone()),
-                    InjectText(t.clone()),
-                    SetTrayState("inserting".into()),
-                ],
+                vec![CopyToClipboard(t.clone()), InjectText(t.clone())],
             )
         }
         (Transcribing, Event::Error(ref msg)) => (
@@ -259,10 +255,9 @@ mod tests {
             &Event::TranscriptReady(text.into()),
         );
         assert_eq!(s, AppState::Inserting);
-        assert_eq!(cmds.len(), 3);
+        assert_eq!(cmds.len(), 2);
         assert!(matches!(&cmds[0], Command::CopyToClipboard(t) if t == "hello world"));
         assert!(matches!(&cmds[1], Command::InjectText(t) if t == "hello world"));
-        assert!(matches!(&cmds[2], Command::SetTrayState(t) if t == "inserting"));
     }
 
     #[test]

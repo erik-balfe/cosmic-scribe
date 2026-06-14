@@ -1,8 +1,14 @@
+<p align="center">
+  <img src="assets/logo.png" width="96" height="96" alt="Cosmic Scribe">
+</p>
+
 # Cosmic Scribe
 
 **Native voice dictation for the COSMIC desktop** — press a shortcut, speak, and text lands in your app. A tray mic shows what’s happening; **History** and **Settings** live in a focused app window. No clutter, no CLI for daily use.
 
-Built for [COSMIC](https://github.com/pop-os/cosmic-epoch) on Pop!_OS and Fedora (Wayland). Transcription uses [xAI Grok speech-to-text](https://docs.x.ai/developers/models/speech-to-text) (paid API key).
+Built for [COSMIC](https://github.com/pop-os/cosmic-epoch) on Pop!_OS and Fedora (Wayland). Transcription uses [xAI Grok speech-to-text](https://docs.x.ai/developers/models/speech-to-text) (paid API key) today; other providers are [planned](docs/BACKLOG.md).
+
+> **Independent project** — not affiliated with System76, Pop!_OS, or the COSMIC desktop. See [docs/BRANDING.md](docs/BRANDING.md).
 
 ## Why Cosmic Scribe
 
@@ -23,7 +29,7 @@ The **capsule** (top of the mic) changes color; the stand stays in your theme co
 |-------|---------|---------------|
 | Idle | White / dark (theme) | Ready — shortcut or tray click to record |
 | **Recording** | **Red** | Microphone is on — speak now |
-| **Recognizing** | **Blue** | Audio is being transcribed — usually a few seconds |
+| **Recognizing** | **Blue** | Transcribing and pasting — until text is in your field (or clipboard) |
 
 This legend is also in **Settings** inside the app.
 
@@ -80,7 +86,7 @@ Step-by-step: [docs/SHORTCUT.md](docs/SHORTCUT.md)
 
 1. Focus any text field.
 2. Press your shortcut → tray capsule turns **red** → speak → shortcut again.
-3. Capsule turns **blue** while recognizing, then text appears in the field (or clipboard only if you chose that in Settings).
+3. Capsule stays **blue** while recognizing and pasting, then idle when done (or clipboard only if you chose that in Settings).
 
 ### 6. When something goes wrong
 
@@ -107,11 +113,12 @@ History files: `~/.local/share/cosmic-scribe/recordings/` (`.raw` audio, `.txt` 
 
 ## Service commands (install / maintenance)
 
-Not needed for daily use — the tray daemon runs after `--install`:
+Not needed for daily use — `--install` enables `com.cosmic-scribe.service` (starts on login with the graphical session, same pattern as cosmic-paste):
 
 | Command | Purpose |
 |---------|---------|
-| `cosmic-scribe --status` | Daemon running? paths? |
+| `cosmic-scribe --status` | Daemon running? paths? systemd unit? |
+| `systemctl --user status com.cosmic-scribe.service` | Login autostart unit |
 | `cosmic-scribe --stop` | Stop daemon |
 | `cosmic-scribe --uninstall` | Remove install (keep data) |
 | `cosmic-scribe --uninstall --purge` | Remove install + all local data |

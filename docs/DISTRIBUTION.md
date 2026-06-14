@@ -81,6 +81,7 @@ See README for the honest motivation around why xAI STT + this architecture make
 - `0.2.0` — prod Tauri GUI, tray icon states, install docs
 - `0.3.0` — tray legend in Settings, INSTALL.md, README screenshots
 - `0.3.1` — login autostart tray race, daemon singleton (one tray icon)
+- `0.3.2` — systemd user service autostart (`com.cosmic-scribe.service`); replaces unreliable COSMIC desktop autostart
 
 ## Release cadence
 
