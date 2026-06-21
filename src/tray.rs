@@ -8,10 +8,12 @@ use crate::state::Event;
 use crate::traits::TrayController;
 use ksni::menu::StandardItem;
 use ksni::{Icon, MenuItem, OfflineReason, Status, ToolTip, Tray, TrayMethods};
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use zbus::zvariant::OwnedValue;
 
 pub use crate::tray_theme::ui_prefers_dark;
 
@@ -197,6 +199,44 @@ fn tray_startup_race(err: &str) -> bool {
         || err.contains("ServiceUnknown")
 }
 
+#[zbus::proxy(
+    interface = "org.freedesktop.DBus.Properties",
+    default_service = "org.kde.StatusNotifierWatcher",
+    default_path = "/StatusNotifierWatcher"
+)]
+trait StatusNotifierWatcherProps {
+    fn get(&self, interface_name: &str, property_name: &str) -> zbus::Result<OwnedValue>;
+}
+
+async fn registered_sni_items() -> anyhow::Result<HashSet<String>> {
+    let connection = zbus::Connection::session().await?;
+    let proxy = StatusNotifierWatcherPropsProxy::new(&connection).await?;
+    let value = proxy
+        .get(
+            "org.kde.StatusNotifierWatcher",
+            "RegisteredStatusNotifierItems",
+        )
+        .await?;
+    let items: Vec<String> = value.try_into()?;
+    Ok(items.into_iter().collect())
+}
+
+async fn wait_for_new_sni_registration(
+    before: &HashSet<String>,
+    timeout: std::time::Duration,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(after) = registered_sni_items().await {
+            if after.difference(before).next().is_some() {
+                return true;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    false
+}
+
 async fn try_spawn_tray(tray: VoiceTray) -> anyhow::Result<ksni::Handle<VoiceTray>> {
     tray.assume_sni_available(true)
         .spawn()
@@ -253,13 +293,24 @@ pub async fn connect_tray_background(
     use std::time::Duration;
 
     const RETRY_DELAY: Duration = Duration::from_secs(5);
+    const REGISTER_TIMEOUT: Duration = Duration::from_secs(15);
     let mut attempt = 0u32;
 
     loop {
         attempt += 1;
+        let before = registered_sni_items().await.unwrap_or_default();
         let tray = VoiceTray::new(toggle_tx.clone());
         match try_spawn_tray(tray).await {
             Ok(handle) => {
+                if !wait_for_new_sni_registration(&before, REGISTER_TIMEOUT).await {
+                    tracing::warn!(
+                        "tray spawned but StatusNotifierWatcher did not register our item \
+                         (attempt {attempt}), retry in {}s",
+                        RETRY_DELAY.as_secs()
+                    );
+                    tokio::time::sleep(RETRY_DELAY).await;
+                    continue;
+                }
                 let theme_handle = handle.clone();
                 tokio::spawn(watch_ui_theme(theme_handle));
                 if let Ok(mut guard) = slot.lock() {

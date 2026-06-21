@@ -486,12 +486,15 @@ pub fn remove_legacy_autostart() {
     remove_autostart_systemd_dropin();
 }
 
+const COSMIC_TRAY_WATCHER: &str = "com.system76.CosmicStatusNotifierWatcher.service";
+
 fn render_systemd_unit(exec: &Path) -> String {
     format!(
         r#"[Unit]
 Description=Cosmic Scribe voice dictation daemon
 Documentation=https://github.com/erik-balfe/cosmic-scribe
-After=graphical-session.target
+After=graphical-session.target {COSMIC_TRAY_WATCHER}
+Wants={COSMIC_TRAY_WATCHER}
 
 [Service]
 Type=simple
@@ -862,6 +865,7 @@ mod tests {
     fn systemd_unit_matches_cosmic_paste_pattern() {
         let unit = render_systemd_unit(&PathBuf::from("/home/u/.local/bin/cosmic-scribe"));
         assert!(unit.contains("After=graphical-session.target"));
+        assert!(unit.contains(COSMIC_TRAY_WATCHER));
         assert!(unit.contains("WantedBy=graphical-session.target"));
         assert!(!unit.contains("WantedBy=default.target"));
         assert!(!unit.contains("ExecStartPre"));
