@@ -141,7 +141,7 @@ Or: `./scripts/uninstall.sh` (finds brew or `~/.local` binary).
 
 | Problem | Check |
 |---------|--------|
-| No tray icon after login | `cosmic-scribe --status` · `systemctl --user status com.cosmic-scribe.service` · `cosmic-scribe --start` |
+| No tray icon after login | Daemon running? `cosmic-scribe --status` · Re-apply unit: `cosmic-scribe --autostart` · Tray registered? `gdbus call --session --dest org.kde.StatusNotifierWatcher --object-path /StatusNotifierWatcher --method org.freedesktop.DBus.Properties.Get org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems` (non-empty after login) |
 | Daemon not running after reboot | Re-run `cosmic-scribe --install` or `--autostart` · `systemctl --user is-enabled com.cosmic-scribe.service` |
 | No app in menu | `./scripts/install-gui-prod.sh` · log out/in or restart panel |
 | GUI build fails | Tauri deps in §2 · `pkg-config --exists glib-2.0` |

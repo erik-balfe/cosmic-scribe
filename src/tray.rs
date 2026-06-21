@@ -305,9 +305,10 @@ pub async fn connect_tray_background(
                 if !wait_for_new_sni_registration(&before, REGISTER_TIMEOUT).await {
                     tracing::warn!(
                         "tray spawned but StatusNotifierWatcher did not register our item \
-                         (attempt {attempt}), retry in {}s",
+                         (attempt {attempt}), discarding handle and retrying in {}s",
                         RETRY_DELAY.as_secs()
                     );
+                    drop(handle);
                     tokio::time::sleep(RETRY_DELAY).await;
                     continue;
                 }
