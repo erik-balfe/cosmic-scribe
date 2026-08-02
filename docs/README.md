@@ -6,21 +6,24 @@ Internal and user-adjacent docs. The main [README](../README.md) is the public l
 
 | Doc | Purpose |
 |-----|---------|
-| [../README.md](../README.md) | Landing page — quick start, tray states, screenshots |
-| [INSTALL.md](INSTALL.md) | **Full install** — runtime + Tauri build deps, Homebrew vs clone, upgrade |
+| [../README.md](../README.md) | **Public landing** — what it is, why, how to install and dictate |
+| [INSTALL.md](INSTALL.md) | Full install — runtime + GUI build deps, Homebrew vs clone |
 | [SCREENSHOTS.md](SCREENSHOTS.md) | README / release screenshots (seed data + capture guide) |
-| [SHORTCUT.md](SHORTCUT.md) | **Global keyboard shortcut** (`cosmic-scribe --trigger`) on COSMIC |
+| [SHORTCUT.md](SHORTCUT.md) | Global keyboard shortcut on COSMIC |
 | [OUTPUT.md](OUTPUT.md) | Clipboard vs wtype output modes |
-| [BRANDING.md](BRANDING.md) | Name disclaimer, official icon, STT roadmap |
+| [STT_PROVIDERS.md](STT_PROVIDERS.md) | Speech API dialects, endpoint setting, OpenAI contrib notes |
+| [RELEASE.md](RELEASE.md) | Ship checklist, known limitations (incl. no VAD cut yet) |
+| [BRANDING.md](BRANDING.md) | Name disclaimer, official icon |
 
 ## Engineering
 
 | Doc | Purpose |
 |-----|---------|
-| [STATE.md](STATE.md) | What’s shipped, verified, and planned (high level) |
-| [BACKLOG.md](BACKLOG.md) | **Task tracker** — bugs, features, research (`open` / `in_progress` / `done`) |
+| [STATE.md](STATE.md) | What’s shipped and planned (high level) |
+| [BACKLOG.md](BACKLOG.md) | **Task tracker** — bugs, features, research |
+| [NATIVE_UI.md](NATIVE_UI.md) | libcosmic UI — user stories, layout rules |
 | [KARAOKE.md](KARAOKE.md) | Word-timed playback UI plan |
-| [TAURI.md](TAURI.md) | Native window UI migration (Tauri 2 spike) |
+| [TAURI.md](TAURI.md) | Tauri 2 window path (parallel/legacy) |
 
 ## Release & distribution
 

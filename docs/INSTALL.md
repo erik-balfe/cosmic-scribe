@@ -6,35 +6,32 @@ End-to-end setup for **Cosmic Scribe** on Fedora / Pop!_OS with the COSMIC deskt
 
 | Component | After install |
 |-----------|----------------|
-| **Tray daemon** | `cosmic-scribe` — mic in the panel, records + transcribes; autostart via `com.cosmic-scribe.service` |
-| **App window** | `cosmic-scribe-gui` — **Cosmic Scribe** in the app menu (History + Settings) |
+| **Tray daemon** | `cosmic-scribe` — mic in the panel; records + transcribes; login autostart via `com.cosmic-scribe.service` |
+| **App window** | History + Settings — **native** libcosmic UI recommended (`cosmic-scribe-gui-native`), or Tauri (`cosmic-scribe-gui`) |
 
-Both are required for the intended workflow. Homebrew installs the **daemon binary only**; the GUI is installed from a git clone (see below).
+Daily use only needs the **daemon + shortcut**. The app window is for history, re-transcribe, and settings.
 
 ## 1. Runtime dependencies (required)
 
-Fedora / Pop!_OS:
-
 ```bash
-sudo dnf install alsa-utils wl-clipboard wtype libnotify
+sudo dnf install alsa-utils wl-clipboard wtype libnotify ffmpeg
 ```
 
 | Package | Provides | Used for |
 |---------|----------|----------|
 | `alsa-utils` | `arecord` | Microphone capture |
-| `wl-clipboard` | `wl-copy` | Clipboard output |
-| `wtype` | `wtype` | Typing into focused field (default output mode) |
-| `libnotify` | `notify-send` | Tray notifications |
+| `ffmpeg` | `ffmpeg` | Progressive Opus encode during recording |
+| `wl-clipboard` | `wl-copy` | Clipboard |
+| `wtype` | `wtype` | Type into focused field (default mode) |
+| `libnotify` | `notify-send` | Notifications |
 
-`wtype` is only needed if output mode is **wtype** (default). Clipboard-only mode still needs `wl-clipboard`.
+`wtype` is optional if you use **clipboard-only** output mode.
 
-The daemon warns at startup if any of these are missing (`cosmic-scribe --daemon` logs).
+## 2. Build dependencies (from source)
 
-## 2. Build dependencies (from source only)
+**Daemon** needs Rust. **Tauri GUI** also needs Node + WebKitGTK. **Native GUI** needs extra system libs (libcosmic / Wayland stack).
 
-Needed to compile **`cosmic-scribe-gui`** (Tauri / WebKitGTK). Not required if you only use a pre-built binary.
-
-Fedora:
+Fedora (daemon + Tauri GUI baseline):
 
 ```bash
 sudo dnf install rust cargo rustfmt rust-clippy nodejs npm \
@@ -42,26 +39,28 @@ sudo dnf install rust cargo rustfmt rust-clippy nodejs npm \
   libappindicator-gtk3-devel librsvg2-devel
 ```
 
-ImageMagick (`ImageMagick`) is optional — used by `scripts/generate-gui-icons.sh` when icon PNGs are missing.
+Native GUI may need additional packages (e.g. `libxkbcommon-devel`, Wayland/COSMIC-related devel libs). If `cargo build -p cosmic-scribe-gui-native` fails on a missing `.pc` file, install the matching `-devel` package and ensure `PKG_CONFIG_PATH` includes `/usr/lib64/pkgconfig`.
 
 ## 3. Install paths
 
-### A. From git clone (recommended — daemon + GUI)
+### A. From git clone (recommended)
 
 ```bash
 git clone https://github.com/erik-balfe/cosmic-scribe.git
 cd cosmic-scribe
-./scripts/install-prod.sh
+./scripts/install-prod.sh              # daemon + Tauri GUI
+./scripts/install-gui-native-prod.sh   # native History/Settings (recommended on COSMIC)
 ```
 
-This builds the release daemon, runs `cosmic-scribe --install`, builds **cosmic-scribe-gui**, and registers the app menu entry. **Existing data is preserved** on reinstall.
+`install-prod.sh` builds the release daemon, runs `cosmic-scribe --install`, and installs the Tauri GUI.  
+`install-gui-native-prod.sh` installs the libcosmic UI; when present, the daemon **prefers** it over Tauri.
 
 Verify:
 
 ```bash
-cosmic-scribe --status          # daemon: running, systemd unit present
+cosmic-scribe --status
 systemctl --user is-enabled com.cosmic-scribe.service
-test -x ~/.local/bin/cosmic-scribe-gui && echo "GUI OK"
+test -x ~/.local/bin/cosmic-scribe-gui-native && echo "native GUI OK"
 ```
 
 ### B. Homebrew (Linux) — daemon binary
@@ -72,13 +71,7 @@ brew install erik-balfe/cosmic-scribe/cosmic-scribe
 $(brew --prefix)/bin/cosmic-scribe --install
 ```
 
-Then install the **GUI** from a clone (Homebrew does not ship `cosmic-scribe-gui` yet):
-
-```bash
-git clone https://github.com/erik-balfe/cosmic-scribe.git
-cd cosmic-scribe
-./scripts/install-gui-prod.sh
-```
+Then install a GUI from a clone (`install-gui-prod.sh` and/or `install-gui-native-prod.sh`). Homebrew does not ship the GUI yet.
 
 ### C. Cargo install — daemon only
 
@@ -87,63 +80,70 @@ git clone https://github.com/erik-balfe/cosmic-scribe.git
 cd cosmic-scribe
 cargo install --path . --locked
 cosmic-scribe --install
-./scripts/install-gui-prod.sh
+./scripts/install-gui-native-prod.sh   # or install-gui-prod.sh
 ```
 
 ## 4. First-time configuration
 
-1. Open **Cosmic Scribe** from the app menu → **Settings**.
-2. Paste your [xAI API key](https://console.x.ai/) → **Save**.
-3. Bind a global shortcut: [SHORTCUT.md](SHORTCUT.md) — command is `~/.local/bin/cosmic-scribe --trigger` (or `$(brew --prefix)/bin/cosmic-scribe --trigger`).
+### Auth (pick one)
 
-CLI alternative: `cosmic-scribe --configure` (terminal only).
+**API key** (usual path):
 
-## 5. Tray icon states
+1. Open **Cosmic Scribe → Settings**, or  
+2. `cosmic-scribe --set-key '…'` / env `COSMIC_SCRIBE_API_KEY`
 
-| State | Capsule color | Meaning |
-|-------|---------------|---------|
-| Idle | Theme (white/dark) | Ready — click tray or use shortcut |
-| **Recording** | **Red** | Microphone is on — speak now |
-| **Recognizing** | **Blue** | Transcribing and pasting — until done |
+Default STT endpoint is `https://api.x.ai/v1/stt` (change under Settings → **STT endpoint**).  
+Provider notes: [STT_PROVIDERS.md](STT_PROVIDERS.md).
 
-Also shown in **Settings** in the app window.
+**Optional — plan sign-in** (SuperGrok / X Premium+):
 
-## 6. Upgrade
+```bash
+cosmic-scribe --login
+```
 
-From clone:
+Browser device-code flow. Cosmic Scribe stores **its own** session on this machine.
+
+Recording is blocked until an API key **or** sign-in is set up.
+
+### Global shortcut
+
+See [SHORTCUT.md](SHORTCUT.md). Command example:
+
+```text
+~/.local/bin/cosmic-scribe --trigger
+```
+
+### Output mode
+
+Default **wtype** (clipboard + type into focus). Use **clipboard** only for terminals that mishandle synthetic typing — [OUTPUT.md](OUTPUT.md).
+
+## 5. Upgrade
 
 ```bash
 cd cosmic-scribe
 git pull
 ./scripts/install-prod.sh
+./scripts/install-gui-native-prod.sh   # if you use native UI
 ```
 
-Homebrew daemon:
+Data under `~/.local/share/cosmic-scribe/` is preserved.
+
+## 6. Uninstall
 
 ```bash
-brew upgrade cosmic-scribe
-"$(brew --prefix)/bin/cosmic-scribe" --update
-# Re-run install-gui-prod.sh from clone if the GUI changed
+cosmic-scribe --uninstall
+./scripts/uninstall-gui-prod.sh
+# native wrapper if installed:
+rm -f ~/.local/bin/cosmic-scribe-gui-native \
+      ~/.local/share/cosmic-scribe/cosmic-scribe-gui-native
+cosmic-scribe --uninstall --purge   # optional: delete all local data
 ```
-
-## 7. Uninstall
-
-```bash
-cosmic-scribe --uninstall              # daemon + autostart (keeps data)
-./scripts/uninstall-gui-prod.sh        # app window only
-cosmic-scribe --uninstall --purge      # also delete ~/.local/share/cosmic-scribe/
-brew uninstall cosmic-scribe           # if installed via Homebrew
-```
-
-Or: `./scripts/uninstall.sh` (finds brew or `~/.local` binary).
 
 ## Troubleshooting
 
-| Problem | Check |
+| Symptom | Check |
 |---------|--------|
-| No tray icon after login | Daemon running? `cosmic-scribe --status` · Re-apply unit: `cosmic-scribe --autostart` · Tray registered? `gdbus call --session --dest org.kde.StatusNotifierWatcher --object-path /StatusNotifierWatcher --method org.freedesktop.DBus.Properties.Get org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems` (non-empty after login) |
-| Daemon not running after reboot | Re-run `cosmic-scribe --install` or `--autostart` · `systemctl --user is-enabled com.cosmic-scribe.service` |
-| No app in menu | `./scripts/install-gui-prod.sh` · log out/in or restart panel |
-| GUI build fails | Tauri deps in §2 · `pkg-config --exists glib-2.0` |
-| Recording silent | `arecord -l` · microphone permissions |
-| No text in field | `wtype` installed · try clipboard mode in Settings |
+| No tray | `cosmic-scribe --status`; session has StatusNotifier; restart daemon |
+| Record blocked | `--login` or set API key |
+| Slow after stop | Ensure `ffmpeg` installed (progressive Opus); see `~/.local/share/cosmic-scribe/daemon.log` |
+| Wrong GUI | Install native script, or `COSMIC_SCRIBE_GUI=tauri` / `native` |

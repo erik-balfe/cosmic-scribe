@@ -1,24 +1,21 @@
 <script>
-  import Combobox from './lib/Combobox.svelte';
   import Select from './lib/Select.svelte';
 
   let { historyTimeMode = $bindable('relative'), onsaved } = $props();
 
   let lang = $state('en');
   let outputMode = $state('wtype');
+  let sttEndpoint = $state('https://api.x.ai/v1/stt');
   let hasKey = $state(false);
-  let hasCorrectionKey = $state(false);
-  let correctionModel = $state('deepseek/deepseek-chat-v4');
+  let authMode = $state('none');
   let saved = $state(false);
   let error = $state('');
   let saving = $state(false);
-  let models = $state([]);
   let apiKey = $state('');
-  let correctionKey = $state('');
 
   const outputOptions = [
-    { value: 'wtype', label: 'wtype — type into focused field (default)' },
-    { value: 'clipboard', label: 'Clipboard — copy only, you paste (terminals)' },
+    { value: 'wtype', label: 'Type into focus — inserts into the focused field (default)' },
+    { value: 'clipboard', label: 'Clipboard only — copy for you to paste (terminals)' },
   ];
 
   const timeModeOptions = [
@@ -29,10 +26,7 @@
   async function load() {
     error = '';
     try {
-      const [cr, mr] = await Promise.all([
-        fetch('/api/config'),
-        fetch('/api/models'),
-      ]);
+      const cr = await fetch('/api/config');
       if (!cr.ok) {
         error = `Failed to load settings (${cr.status})`;
         return;
@@ -41,13 +35,9 @@
       lang = c.lang || 'en';
       outputMode = c.output_mode === 'clipboard' ? 'clipboard' : 'wtype';
       historyTimeMode = c.history_time_mode === 'absolute' ? 'absolute' : 'relative';
+      sttEndpoint = c.stt_endpoint || 'https://api.x.ai/v1/stt';
       hasKey = c.has_key;
-      hasCorrectionKey = c.has_correction_key;
-      correctionModel = c.correction_model || 'deepseek/deepseek-chat-v4';
-      if (mr.ok) {
-        const m = await mr.json();
-        if (Array.isArray(m)) models = m;
-      }
+      authMode = c.auth_mode || (c.has_key ? 'api_key' : 'none');
     } catch {
       error = 'Failed to load settings';
     }
@@ -63,10 +53,9 @@
       lang,
       output_mode: outputMode,
       history_time_mode: historyTimeMode,
-      correction_model: correctionModel,
+      stt_endpoint: sttEndpoint,
     };
     if (apiKey) body.key = apiKey;
-    if (correctionKey) body.correction_key = correctionKey;
     try {
       const r = await fetch('/api/config', {
         method: 'POST',
@@ -77,9 +66,7 @@
       if (r.ok) {
         saved = true;
         apiKey = '';
-        correctionKey = '';
         if (body.key) hasKey = true;
-        if (body.correction_key) hasCorrectionKey = true;
         setTimeout(() => saved = false, 2000);
         onsaved?.();
       } else {
@@ -141,31 +128,47 @@
     </div>
   </section>
 
+  <section class="auth-block" aria-label="Account">
+    <span class="legend-heading">Account</span>
+    <p class="field-hint">
+      Cloud speech needs an API key. Optional: sign in with SuperGrok or X Premium+ for plan access
+      (<code>cosmic-scribe --login</code>).
+    </p>
+    <p class="field-hint auth-status">
+      Connection:
+      {#if authMode === 'oauth'}
+        <span class="ok">signed in</span>
+      {:else if authMode === 'api_key' || authMode === 'api_key_env'}
+        <span class="ok">using an API key</span>
+      {:else if hasKey}
+        <span class="ok">API key available</span>
+      {:else}
+        <span class="err">not set up yet</span>
+      {/if}
+    </p>
+  </section>
   <label>
-    <span>API Key</span>
-    <input type="password" bind:value={apiKey} placeholder={hasKey ? '(stored)' : 'sk-...'} autocomplete="off">
+    <span>API key</span>
+    <input type="password" bind:value={apiKey} placeholder={hasKey && authMode !== 'oauth' ? '(saved on this computer)' : 'paste speech API key…'} autocomplete="off">
+    <span class="field-hint">For cloud speech recognition. Environment keys take priority over a key saved here.</span>
   </label>
   <label>
     <span>Language</span>
     <input type="text" bind:value={lang} placeholder="en" autocomplete="off" spellcheck="false" />
-    <span class="field-hint">Code sent to xAI STT (e.g. en, de, ja). Default is en.</span>
+    <span class="field-hint">Language code for recognition (en, ru, de, ja…). Default: en.</span>
   </label>
   <label>
-    <span>Text output</span>
+    <span>STT endpoint</span>
+    <input type="url" bind:value={sttEndpoint} placeholder="https://api.x.ai/v1/stt" autocomplete="off" spellcheck="false" />
+    <span class="field-hint">Full URL for the current speech dialect (default xAI). Changing host alone is not enough for OpenAI Whisper — see docs/STT_PROVIDERS.md.</span>
+  </label>
+  <label>
+    <span>When text is ready</span>
     <Select options={outputOptions} bind:value={outputMode} />
   </label>
   <label>
-    <span>History timestamps</span>
+    <span>History time labels</span>
     <Select options={timeModeOptions} bind:value={historyTimeMode} />
-  </label>
-  <label>
-    <span>OpenRouter Key <span class="beta">beta</span></span>
-    <span class="field-hint beta-hint">AI correction is experimental — marking words and “Fix with AI” may give poor results.</span>
-    <input type="password" bind:value={correctionKey} placeholder={hasCorrectionKey ? '(stored)' : 'sk-or-v1-...'} autocomplete="off">
-  </label>
-  <label>
-    <span>Correction Model <span class="beta">beta</span></span>
-    <Combobox options={models} bind:value={correctionModel} placeholder="Select model..." />
   </label>
   <div class="actions">
     <button class="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
@@ -235,7 +238,6 @@
     color: var(--text-muted);
     margin-bottom: 6px;
   }
-  .beta-hint { margin: 4px 0 8px; }
   .actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; min-height: 40px; }
   .status { min-width: 0; flex: 1; min-height: 20px; }
   .ok { color: var(--success); font-size: 13px; }

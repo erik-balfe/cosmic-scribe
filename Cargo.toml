@@ -1,5 +1,6 @@
 [workspace]
-members = [".", "gui"]
+members = [".", "gui", "gui-native"]
+default-members = [".", "gui"]
 resolver = "2"
 
 [package]
@@ -7,7 +8,7 @@ name = "cosmic-scribe"
 version = "0.3.3"
 edition = "2021"
 authors = ["Erik <erik.balfe@proton.me>"]
-description = "Cosmic Scribe — COSMIC desktop voice dictation via xAI Grok STT"
+description = "Cosmic Scribe — COSMIC desktop voice dictation (cloud speech-to-text)"
 repository = "https://github.com/erik-balfe/cosmic-scribe"
 homepage = "https://github.com/erik-balfe/cosmic-scribe"
 license = "MIT"

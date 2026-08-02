@@ -31,6 +31,18 @@ async fn main() -> anyhow::Result<()> {
     }
     check_deps();
 
+    if args.iter().any(|a| a == "--login") {
+        let no_browser = args.iter().any(|a| a == "--no-browser");
+        cosmic_scribe::xai_oauth::login_device_code(!no_browser)?;
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--logout") {
+        cosmic_scribe::xai_oauth::clear()?;
+        eprintln!("Signed out (API key left untouched)");
+        return Ok(());
+    }
+
     if args.iter().any(|a| a == "--set-key") {
         let key = args
             .iter()
@@ -39,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
             .cloned()
             .unwrap_or_default();
         ConfigFileKeyring.set_api_key(&key)?;
-        eprintln!("API key saved");
+        eprintln!("API key saved. Optional: --login if you use SuperGrok or X Premium+.");
         return Ok(());
     }
 
@@ -57,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
             .cloned()
             .unwrap_or_default();
         keyring::set_language(&lang)?;
-        eprintln!("STT language set to: {lang}");
+        eprintln!("Speech language set to: {lang}");
         return Ok(());
     }
 
@@ -163,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn print_usage() {
-    eprintln!("Cosmic Scribe — record → Grok STT → insert text (wtype or clipboard)");
+    eprintln!("Cosmic Scribe — record → speech-to-text → insert text");
     eprintln!();
     eprintln!("Service (background daemon + tray):");
     eprintln!(
@@ -186,13 +198,19 @@ fn print_usage() {
     eprintln!("  --file-input=<path>  Transcribe pre-recorded raw PCM");
     eprintln!();
     eprintln!("Setup:");
-    eprintln!("  --configure          Interactive API key + language");
-    eprintln!("  --history            Tauri window — recording history");
-    eprintln!("  --settings           Tauri window — API key, language, output mode");
+    eprintln!("  --login              Sign in (SuperGrok / X Premium+ plan access)");
+    eprintln!("  --logout             Sign out (API key left untouched)");
+    eprintln!("  --no-browser         With --login: print URL only (SSH/headless)");
+    eprintln!("  --configure          Interactive auth + language");
+    eprintln!("  --history            History window");
+    eprintln!("  --settings           Settings window");
     eprintln!("  --autostart          Enable com.cosmic-scribe.service (graphical-session.target)");
-    eprintln!("  --set-key KEY        Store xAI API key");
+    eprintln!("  --set-key KEY        Store speech API key (or COSMIC_SCRIBE_API_KEY)");
     eprintln!("  --clear-key          Remove stored API key");
-    eprintln!("  --set-lang LANG      Set STT language (default: en)");
+    eprintln!("  --set-lang LANG      Set speech language (default: en)");
+    eprintln!();
+    eprintln!("Speech endpoint (xAI dialect; see docs/STT_PROVIDERS.md):");
+    eprintln!("  COSMIC_SCRIBE_STT_URL  Full STT URL (default https://api.x.ai/v1/stt)");
 }
 
 async fn trigger_mode() -> anyhow::Result<()> {
@@ -313,6 +331,10 @@ async fn daemon_mode() -> anyhow::Result<()> {
     tokio::spawn(tray::connect_tray_background(tray_tx, tray_slot));
     tracing::info!("tray connect task spawned (retries until panel ready)");
 
+    // Keep SuperGrok access token warm so STT never blocks on refresh after long idle.
+    tokio::spawn(cosmic_scribe::xai_oauth::keep_warm_loop());
+    tracing::info!("xAI OAuth keep-warm task spawned");
+
     tracing::info!(
         "Cosmic Scribe daemon — use '{APP_SLUG} --trigger', tray click, or Ctrl+C to stop"
     );
@@ -336,27 +358,43 @@ fn configure_mode() -> anyhow::Result<()> {
     use std::io::{self, Write};
 
     let lang = keyring::get_language();
-    let has_key = ConfigFileKeyring.get_api_key().is_ok();
+    let auth = cosmic_scribe::xai_oauth::auth_status_label();
+    let has_creds = ConfigFileKeyring.get_api_key().is_ok();
 
     println!("=== Cosmic Scribe configuration ===\n");
     println!(
-        "API key: {}",
-        if has_key { "**** (set)" } else { "(not set)" }
+        "Auth: {} {}",
+        auth,
+        if has_creds {
+            "(usable credential present)"
+        } else {
+            "(not configured)"
+        }
     );
+    println!("  API key:  --set-key  (or paste in Settings)");
+    println!("  optional: --login   (SuperGrok / X Premium+ plan access)\n");
     println!("Language: {}\n", lang);
 
-    print!("Enter API key (or press Enter to keep current): ");
+    print!("Sign in with SuperGrok / X Premium+ now? [Y/n]: ");
     io::stdout().flush().ok();
-    let mut key_input = String::new();
-    io::stdin().read_line(&mut key_input)?;
-    let key_input = key_input.trim().to_string();
-
-    if !key_input.is_empty() {
-        ConfigFileKeyring.set_api_key(&key_input)?;
-        println!("API key updated.");
+    let mut ans = String::new();
+    io::stdin().read_line(&mut ans)?;
+    let ans = ans.trim().to_lowercase();
+    if ans.is_empty() || ans == "y" || ans == "yes" {
+        cosmic_scribe::xai_oauth::login_device_code(true)?;
+    } else {
+        print!("Enter API key (or press Enter to skip): ");
+        io::stdout().flush().ok();
+        let mut key_input = String::new();
+        io::stdin().read_line(&mut key_input)?;
+        let key_input = key_input.trim().to_string();
+        if !key_input.is_empty() {
+            ConfigFileKeyring.set_api_key(&key_input)?;
+            println!("API key updated.");
+        }
     }
 
-    print!("Language code for STT (default en; press Enter to keep '{lang}'): ");
+    print!("Speech language code (default en; press Enter to keep '{lang}'): ");
     io::stdout().flush().ok();
     let mut lang_input = String::new();
     io::stdin().read_line(&mut lang_input)?;

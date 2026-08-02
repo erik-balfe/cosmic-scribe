@@ -42,5 +42,8 @@ echo "==> Installing Tauri GUI"
 "$ROOT/scripts/install-gui-prod.sh"
 
 echo ""
-echo "Prod install complete. Data: ${HOME}/.local/share/cosmic-scribe/"
+echo "Prod install complete (daemon + Tauri GUI)."
+echo "Optional native COSMIC UI:  ./scripts/install-gui-native-prod.sh"
+echo "Auth:  cosmic-scribe --login   # or set API key in Settings"
+echo "Data:  ${HOME}/.local/share/cosmic-scribe/"
 "$BIN" --status

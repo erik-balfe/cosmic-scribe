@@ -34,12 +34,17 @@ cd web && npm ci && npm run lint && npm run build
 ### Install for local testing
 
 ```bash
-./scripts/install-prod.sh
+./scripts/install-prod.sh                 # daemon + Tauri GUI
+./scripts/install-gui-native-prod.sh      # optional: libcosmic UI (preferred on COSMIC)
 ```
 
-Installs daemon + Tauri GUI. API key: **Cosmic Scribe → Settings** (or `cosmic-scribe --configure`).
+Auth: API key in Settings / `cosmic-scribe --set-key` / `COSMIC_SCRIBE_API_KEY`, **or** `cosmic-scribe --login` (SuperGrok plan OAuth).
 
-Run the daemon directly for development:
+**STT providers:** default dialect is xAI (`POST …/v1/stt`). Endpoint is configurable. OpenAI Whisper and other dialects need a client adapter — see **[docs/STT_PROVIDERS.md](docs/STT_PROVIDERS.md)** (welcome contributions).
+
+Runtime deps include **ffmpeg** (progressive Opus). See [docs/INSTALL.md](docs/INSTALL.md).
+
+Run the daemon for development:
 
 ```bash
 ./target/release/cosmic-scribe --daemon
@@ -51,28 +56,18 @@ Trigger recording:
 ./target/release/cosmic-scribe --trigger
 ```
 
-Or one-shot:
+### GUIs
+
+| Path | Notes |
+|------|--------|
+| **libcosmic** `gui-native/` | Native COSMIC look; `cargo build -p cosmic-scribe-gui-native` (needs system libs; CI may exclude it) |
+| **Tauri** `gui/` + `web/` | WebKit window; build `web` then Tauri package |
+
+Svelte UI (embedded in daemon / Tauri):
 
 ```bash
-./target/release/cosmic-scribe --record-once
+cd web && npm install && npm run build
 ```
-
-### Web UI (embedded Svelte)
-
-The history/settings UI is a small Svelte 5 app embedded via `rust-embed`.
-
-```bash
-cd web
-npm install
-npm run build
-```
-
-Then rebuild the Rust binary so the assets are included.
-
-Routes in the embedded server:
-- `/` — history list
-- `/recording/:id` — detail view (waveform + versions)
-- `/settings` — API key, language, correction model
 
 ### Running tests
 

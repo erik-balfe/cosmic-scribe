@@ -32,6 +32,16 @@ pub fn daemon_binary() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(dir) = test_data_dir() {
+        return dir;
+    }
+    // Optional override for packaging / sandboxes (not used by default installs).
+    if let Ok(dir) = std::env::var("COSMIC_SCRIBE_DATA_DIR") {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).ok();
+        return dir;
+    }
     migrate_legacy_data_dir();
     let dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -46,6 +56,10 @@ pub fn daemon_log_path() -> PathBuf {
 }
 
 pub fn recordings_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(dir) = test_recordings_dir() {
+        return dir;
+    }
     if let Ok(dir) = std::env::var("COSMIC_SCRIBE_RECORDINGS_DIR") {
         let dir = PathBuf::from(dir);
         std::fs::create_dir_all(&dir).ok();
@@ -102,11 +116,34 @@ pub fn release_daemon_lock() {
     }
 }
 
+fn gui_backend() -> &'static str {
+    match std::env::var("COSMIC_SCRIBE_GUI")
+        .ok()
+        .or_else(|| std::env::var("VOICE_INPUT_GUI").ok())
+        .as_deref()
+    {
+        Some("tauri") | Some("web") => "tauri",
+        Some("native") => "native",
+        // Prefer libcosmic when installed — matches COSMIC system look & theming.
+        _ => {
+            let native = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".local/bin/cosmic-scribe-gui-native");
+            if native.is_file() {
+                "native"
+            } else {
+                "tauri"
+            }
+        }
+    }
+}
+
 pub fn gui_binary_path(debug: bool) -> PathBuf {
-    let name = if debug {
-        "cosmic-scribe-gui-debug"
-    } else {
-        "cosmic-scribe-gui"
+    let name = match (gui_backend(), debug) {
+        ("native", true) => "cosmic-scribe-gui-native-debug",
+        ("native", false) => "cosmic-scribe-gui-native",
+        (_, true) => "cosmic-scribe-gui-debug",
+        (_, false) => "cosmic-scribe-gui",
     };
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -114,12 +151,32 @@ pub fn gui_binary_path(debug: bool) -> PathBuf {
         .join(name)
 }
 
-/// Spawn prod Tauri window (History or Settings). Single instance enforced by `gui.lock`.
+pub fn gui_real_binary_path(debug: bool) -> PathBuf {
+    let name = match (gui_backend(), debug) {
+        ("native", true) => "cosmic-scribe-gui-native-debug",
+        ("native", false) => "cosmic-scribe-gui-native",
+        (_, true) => "cosmic-scribe-gui-debug",
+        (_, false) => "cosmic-scribe-gui",
+    };
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".local/share/cosmic-scribe")
+        .join(name)
+}
+
+/// Spawn prod GUI window (History or Settings). Backend: Tauri (default) or libcosmic (`COSMIC_SCRIBE_GUI=native`).
 pub fn spawn_gui(settings: bool) -> anyhow::Result<()> {
     let bin = gui_binary_path(false);
     if !bin.is_file() {
+        let install = match gui_backend() {
+            "native" => "./scripts/install-gui-native-prod.sh",
+            _ => "./scripts/install-gui-prod.sh",
+        };
         anyhow::bail!(
-            "cosmic-scribe-gui not installed at {}. Run: ./scripts/install-gui-prod.sh",
+            "{} not installed at {}. Run: {install}",
+            bin.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("cosmic-scribe-gui"),
             bin.display()
         );
     }
@@ -176,18 +233,33 @@ pub fn release_gui_debug_lock() {
     release_gui_lock(true);
 }
 
+/// Point config + recordings at a process-private temp tree.
+///
+/// **Must** isolate the whole data dir: config files (`output-mode`, `lang`,
+/// API keys, OAuth) live under `data_dir()`, not only under recordings/.
+/// Without this, tests that call `save_config` clobber the user's real settings.
+#[cfg(test)]
+static TEST_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+#[cfg(test)]
+static TEST_RECORDINGS_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn test_data_dir() -> Option<PathBuf> {
+    TEST_DATA_DIR.get().cloned()
+}
+
+#[cfg(test)]
+fn test_recordings_dir() -> Option<PathBuf> {
+    TEST_RECORDINGS_DIR.get().cloned()
+}
+
 #[cfg(test)]
 pub fn init_test_recordings_dir() {
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        let base = std::env::temp_dir().join(format!(
-            "cosmic-scribe-test-recordings-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&base).ok();
-        std::env::set_var("COSMIC_SCRIBE_RECORDINGS_DIR", &base);
-    });
+    let base = std::env::temp_dir().join(format!("cosmic-scribe-test-data-{}", std::process::id()));
+    let recordings = base.join("recordings");
+    std::fs::create_dir_all(&recordings).ok();
+    let _ = TEST_DATA_DIR.set(base);
+    let _ = TEST_RECORDINGS_DIR.set(recordings);
 }
 
 fn legacy_data_dir() -> PathBuf {
@@ -645,6 +717,18 @@ pub fn print_status() {
             "running"
         } else {
             "stopped"
+        }
+    );
+    let auth = crate::xai_oauth::auth_status_label();
+    let has_bearer = crate::traits::KeyringStore::get_api_key(&crate::keyring::ConfigFileKeyring)
+        .map(|k| !k.is_empty())
+        .unwrap_or(false);
+    eprintln!(
+        "  xAI auth: {auth} ({})",
+        if has_bearer {
+            "ready for STT"
+        } else {
+            "not configured — run --login"
         }
     );
     let share = share_binary();

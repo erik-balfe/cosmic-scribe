@@ -2,7 +2,7 @@
 // Serves embedded Svelte SPA + JSON API.
 // SPA is built from web/ via `npm run build` and embedded with rust-embed.
 
-use crate::traits::KeyringStore;
+use crate::api::{self, ApiError};
 use rust_embed::RustEmbed;
 use std::io::Write;
 use std::net::TcpListener;
@@ -12,10 +12,6 @@ use std::path::PathBuf;
 #[folder = "web/dist"]
 struct Assets;
 
-fn recordings_dir() -> std::path::PathBuf {
-    crate::lifecycle::recordings_dir()
-}
-
 fn serve_asset(path: &str) -> Option<(String, Vec<u8>)> {
     let path = path.trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
@@ -23,7 +19,6 @@ fn serve_asset(path: &str) -> Option<(String, Vec<u8>)> {
         let mime = mime_guess(path);
         Some((mime, file.data.to_vec()))
     } else {
-        // SPA routing: serve index.html for client-side routes
         Assets::get("index.html").map(|f| ("text/html".into(), f.data.to_vec()))
     }
 }
@@ -38,6 +33,32 @@ fn mime_guess(path: &str) -> String {
         _ => "application/octet-stream",
     }
     .into()
+}
+
+fn api_ok_json<T: serde::Serialize>(value: &T) -> (String, String, String) {
+    (
+        "200 OK".into(),
+        "application/json".into(),
+        serde_json::to_string(value).unwrap_or_else(|_| "{}".into()),
+    )
+}
+
+fn api_error(err: ApiError) -> (String, String, String) {
+    let (status, msg) = match &err {
+        ApiError::NotFound(m) => ("404 Not Found", m),
+        ApiError::BadRequest(m) => ("400 Bad Request", m),
+        ApiError::Internal(m) => ("500 Internal Server Error", m),
+    };
+    let json = serde_json::json!({ "ok": false, "error": msg }).to_string();
+    (status.into(), "application/json".into(), json)
+}
+
+fn recording_id_from_path(path: &str, suffix: &str) -> String {
+    path.strip_prefix("/api/recording/")
+        .unwrap_or("")
+        .trim_end_matches(suffix)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn handle_api(req: &str, body: &str) -> (String, String, String) {
@@ -65,15 +86,6 @@ fn handle_api(req: &str, body: &str) -> (String, String, String) {
     }
 }
 
-fn ts_to_human(parts: &[&str]) -> String {
-    if parts.len() < 2 {
-        return parts.join(" ");
-    }
-    let date = parts[0].to_string();
-    let time = parts[1].replace('-', ":");
-    format!("{date} {time}")
-}
-
 fn api_history(path: &str) -> (String, String, String) {
     let query: std::collections::HashMap<String, String> = path
         .split('?')
@@ -91,141 +103,32 @@ fn api_history(path: &str) -> (String, String, String) {
         .get("limit")
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
-
-    let mut entries = Vec::new();
-    let dir = recordings_dir();
-    if let Ok(read_dir) = std::fs::read_dir(&dir) {
-        let mut raws: Vec<_> = read_dir
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                let p = e.path();
-                p.extension().map(|x| x == "raw").unwrap_or(false)
-                    && !crate::recording::is_junk_recording(&p)
-            })
-            .collect();
-        raws.sort_by_key(|e| {
-            std::fs::metadata(e.path())
-                .ok()
-                .and_then(|m| m.modified().ok())
-        });
-        raws.reverse();
-        for entry in raws.iter().skip(offset).take(limit) {
-            let path = entry.path();
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-            let txt = path.with_extension("txt");
-            let text = std::fs::read_to_string(&txt).ok();
-            let meta = path.with_extension("json");
-            let meta_json = std::fs::read_to_string(&meta).ok();
-            let has_text = text.is_some();
-            let has_stt = path.with_extension("stt.json").is_file();
-            let parts: Vec<&str> = stem.split('_').collect();
-            let ts = ts_to_human(&parts);
-            let dur = parts.last().unwrap_or(&"0").replace("ms", "");
-            let dur_secs = dur.parse::<u64>().unwrap_or(0) / 1000;
-            let mut entry = serde_json::json!({
-                "file": stem,
-                "ts": ts,
-                "duration": format!("{}s", dur_secs),
-                "text": text,
-                "has_text": has_text,
-                "has_stt": has_stt,
-            });
-            if let Some(meta_v) =
-                meta_json.and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
-            {
-                entry["versions"] = meta_v
-                    .get("versions")
-                    .cloned()
-                    .unwrap_or(serde_json::json!([]));
-            }
-            entries.push(entry);
-        }
-    }
-    let json = serde_json::Value::Array(entries).to_string();
-    ("200 OK".into(), "application/json".into(), json)
+    let entries = api::list_history(offset, limit);
+    api_ok_json(&entries)
 }
 
 fn api_waveform(path: &str) -> (String, String, String) {
-    let id = path
-        .strip_prefix("/api/recording/")
-        .unwrap_or("")
-        .trim_end_matches("/waveform");
-    let raw_path = recordings_dir().join(format!("{id}.raw"));
-    let wf = serde_json::json!({"waveform": waveform_data(&raw_path)}).to_string();
-    ("200 OK".into(), "application/json".into(), wf)
+    let id = recording_id_from_path(path, "/waveform");
+    match api::validate_recording_id(&id) {
+        Ok(safe) => {
+            let raw_path = api::recordings_dir().join(format!("{safe}.raw"));
+            let wf = serde_json::json!({"waveform": api::waveform_data(&raw_path)});
+            api_ok_json(&wf)
+        }
+        Err(e) => api_error(e),
+    }
 }
 
 fn api_recording_get(path: &str) -> (String, String, String) {
-    let id = path
-        .strip_prefix("/api/recording/")
-        .unwrap_or("")
-        .trim_end_matches('/');
-    let raw_path = recordings_dir().join(format!("{id}.raw"));
-    let txt_path = recordings_dir().join(format!("{id}.txt"));
-    let meta_path = recordings_dir().join(format!("{id}.json"));
-
-    let text = std::fs::read_to_string(&txt_path).ok().unwrap_or_default();
-    let has_text = !text.trim().is_empty();
-    let meta = std::fs::read_to_string(&meta_path)
-        .ok()
-        .and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
-        .unwrap_or(serde_json::json!({}));
-
-    let parts: Vec<&str> = id.split('_').collect();
-    let ts = ts_to_human(&parts);
-    let dur = parts.last().unwrap_or(&"0").replace("ms", "");
-    let dur_secs = dur.parse::<u64>().unwrap_or(0) / 1000;
-
-    let stt_path = recordings_dir().join(format!("{id}.stt.json"));
-    let stt = std::fs::read_to_string(&stt_path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-
-    let json = serde_json::json!({
-        "file": id,
-        "ts": ts,
-        "duration": format!("{}s", dur_secs),
-        "lang": crate::keyring::get_language(),
-        "text": text,
-        "has_text": has_text,
-        "has_stt": stt.is_some(),
-        "stt": stt,
-        "versions": meta.get("versions").cloned().unwrap_or(serde_json::json!([])),
-        "waveform": waveform_data(&raw_path),
-    })
-    .to_string();
-    ("200 OK".into(), "application/json".into(), json)
-}
-
-fn waveform_data(path: &std::path::Path) -> Vec<f64> {
-    let Ok(raw) = std::fs::read(path) else {
-        return vec![];
-    };
-    if raw.len() < 4 {
-        return vec![];
+    let id = recording_id_from_path(path, "");
+    match api::get_recording(&id) {
+        Ok(detail) => api_ok_json(&detail),
+        Err(e) => api_error(e),
     }
-    let samples: Vec<i16> = raw
-        .chunks_exact(2)
-        .map(|c| i16::from_le_bytes([c[0], c[1]]))
-        .collect();
-    let bars = 200usize;
-    let step = (samples.len() / bars).max(1);
-    (0..bars)
-        .map(|i| {
-            let start = (i * step).min(samples.len());
-            let end = ((i + 1) * step).min(samples.len());
-            let slice = &samples[start..end];
-            let max = slice.iter().map(|s| (*s as i32).abs()).max().unwrap_or(0) as f64;
-            (max / 32768.0).min(1.0)
-        })
-        .collect()
 }
 
 fn api_edit(path: &str, body: &str) -> (String, String, String) {
-    let id = path
-        .strip_prefix("/api/recording/")
-        .unwrap_or("")
-        .trim_end_matches("/edit");
+    let id = recording_id_from_path(path, "/edit");
     let v: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return ("400 Bad Request".into(), "text/plain".into(), e.to_string()),
@@ -235,133 +138,38 @@ fn api_edit(path: &str, body: &str) -> (String, String, String) {
         .get("type")
         .and_then(|t| t.as_str())
         .unwrap_or("user_edit");
-
-    let meta_path = recordings_dir().join(format!("{id}.json"));
-    let mut meta: serde_json::Value = std::fs::read_to_string(&meta_path)
-        .ok()
-        .and_then(|m| serde_json::from_str(&m).ok())
-        .unwrap_or(serde_json::json!({}));
-
-    let ts = chrono::Utc::now().to_rfc3339();
-    let versions = if let Some(arr) = meta.get_mut("versions").and_then(|v| v.as_array_mut()) {
-        arr
-    } else {
-        meta["versions"] = serde_json::json!([]);
-        meta["versions"].as_array_mut().unwrap()
-    };
-
-    versions.push(serde_json::json!({
-        "type": edit_type,
-        "text": new_text,
-        "timestamp": ts,
-    }));
-
-    let _ = std::fs::write(&meta_path, serde_json::to_string(&meta).unwrap_or_default());
-    (
-        "200 OK".into(),
-        "application/json".into(),
-        r#"{"ok":true}"#.into(),
-    )
-}
-
-fn duration_ms_from_id(id: &str) -> u64 {
-    id.rsplit('_')
-        .next()
-        .and_then(|s| s.strip_suffix("ms"))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0)
-}
-
-fn api_error(status: &str, msg: &str) -> (String, String, String) {
-    let json = serde_json::json!({ "ok": false, "error": msg }).to_string();
-    (status.into(), "application/json".into(), json)
+    match api::save_user_edit(&id, new_text, edit_type) {
+        Ok(()) => (
+            "200 OK".into(),
+            "application/json".into(),
+            r#"{"ok":true}"#.into(),
+        ),
+        Err(e) => api_error(e),
+    }
 }
 
 fn api_transcribe(path: &str) -> (String, String, String) {
-    use crate::app::save_stt_artifacts;
-    use crate::keyring::ConfigFileKeyring;
-    use crate::stt::XaiSttClient;
-    use crate::traits::{AudioData, SttClient};
-    use std::sync::Arc;
-
-    let id = path
-        .strip_prefix("/api/recording/")
-        .unwrap_or("")
-        .trim_end_matches("/transcribe");
-    let raw_path = recordings_dir().join(format!("{id}.raw"));
-    if !raw_path.is_file() {
-        return api_error("404 Not Found", "recording not found");
-    }
-
-    let bytes = match std::fs::read(&raw_path) {
-        Ok(b) => b,
-        Err(e) => return api_error("500 Internal Server Error", &e.to_string()),
-    };
-
-    let keyring = Arc::new(ConfigFileKeyring);
-    match keyring.get_api_key() {
-        Ok(key) if !key.is_empty() => {}
-        _ => {
-            return api_error(
-                "400 Bad Request",
-                "API key not configured — open Settings to add your xAI key",
-            );
-        }
-    }
-
-    let audio = AudioData {
-        bytes,
-        sample_rate: 16000,
-        channels: 1,
-        duration_ms: duration_ms_from_id(id),
-    };
-    let stt: Arc<dyn SttClient> = Arc::new(XaiSttClient::new(keyring));
-
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => return api_error("500 Internal Server Error", &e.to_string()),
-    };
-
-    match rt.block_on(stt.transcribe(&audio)) {
-        Ok(result) => {
-            save_stt_artifacts(&raw_path, &result);
-            let json = serde_json::json!({
-                "ok": true,
-                "text": result.text,
-                "has_stt": !result.words.is_empty(),
-            })
-            .to_string();
-            ("200 OK".into(), "application/json".into(), json)
-        }
-        Err(e) => api_error("500 Internal Server Error", &e.to_string()),
+    let id = recording_id_from_path(path, "/transcribe");
+    match api::transcribe_recording(&id) {
+        Ok(result) => api_ok_json(&result),
+        Err(e) => api_error(e),
     }
 }
 
 fn api_delete(path: &str) -> (String, String, String) {
-    let id = path
-        .strip_prefix("/api/recording/")
-        .unwrap_or("")
-        .trim_end_matches("/delete");
-    let raw = recordings_dir().join(format!("{id}.raw"));
-    let txt = recordings_dir().join(format!("{id}.txt"));
-    let meta = recordings_dir().join(format!("{id}.json"));
-    let stt = recordings_dir().join(format!("{id}.stt.json"));
-    let _ = std::fs::remove_file(&raw);
-    let _ = std::fs::remove_file(&txt);
-    let _ = std::fs::remove_file(&meta);
-    let _ = std::fs::remove_file(&stt);
-    (
-        "200 OK".into(),
-        "application/json".into(),
-        r#"{"ok":true}"#.into(),
-    )
+    let id = recording_id_from_path(path, "/delete");
+    match api::delete_recording(&id) {
+        Ok(()) => (
+            "200 OK".into(),
+            "application/json".into(),
+            r#"{"ok":true}"#.into(),
+        ),
+        Err(e) => api_error(e),
+    }
 }
 
 fn api_correct(path: &str, body: &str) -> (String, String, String) {
-    let id = path
-        .strip_prefix("/api/recording/")
-        .unwrap_or("")
-        .trim_end_matches("/correct");
+    let id = recording_id_from_path(path, "/correct");
     let v: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return ("400 Bad Request".into(), "text/plain".into(), e.to_string()),
@@ -387,260 +195,39 @@ fn api_correct(path: &str, body: &str) -> (String, String, String) {
         })
         .unwrap_or_default();
 
-    let correction_key = crate::keyring::get_correction_key();
-
-    if correction_key.is_empty() {
-        return (
-            "400 Bad Request".into(),
+    match api::correct_recording(&id, text, &marked, &kept) {
+        Ok(corrected) => (
+            "200 OK".into(),
             "application/json".into(),
-            serde_json::json!({"error": "OpenRouter API key not configured. Add it in Settings."})
-                .to_string(),
-        );
-    }
-
-    let prompt = format!(
-        "You are correcting a speech-to-text transcription from Cosmic Scribe.\n\
-         The user spoke into a microphone, and an STT model transcribed it.\n\
-         The user has marked some words/phrases:\n\
-         - RED (must change): {}\n\
-         - GREEN (must keep): {}\n\
-         - UNMARKED (can change if needed): everything else\n\n\
-         Full transcript:\n{text}\n\n\
-         Rules:\n\
-         1. Words marked RED are likely wrong — replace with phonetically similar\n\
-            words that fit the context better.\n\
-         2. Words marked GREEN must NOT change.\n\
-         3. Unmarked words may be adjusted slightly for grammar/flow.\n\
-         4. Maintain the overall meaning and style.\n\n\
-         Return ONLY the corrected full transcript. No explanation.",
-        if marked.is_empty() {
-            "none".into()
-        } else {
-            marked.join(", ")
-        },
-        if kept.is_empty() {
-            "none".into()
-        } else {
-            kept.join(", ")
-        },
-    );
-
-    // We're called from a tokio runtime context, so reqwest::blocking's internal
-    // runtime can panic. Hop to a fresh OS thread that has no runtime.
-    let model = crate::keyring::get_correction_model();
-    let model = if model.is_empty() {
-        "deepseek/deepseek-chat".to_string()
-    } else {
-        model
-    };
-    let prompt_owned = prompt.clone();
-    let key_owned = correction_key.clone();
-    let model_for_thread = model.clone();
-    let handle = std::thread::spawn(move || -> Result<String, String> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let resp = client
-            .post("https://openrouter.ai/api/v1/chat/completions")
-            .header("Authorization", format!("Bearer {key_owned}"))
-            .header(
-                "HTTP-Referer",
-                "https://github.com/erik-balfe/cosmic-scribe",
-            )
-            .header("X-Title", "Cosmic Scribe")
-            .json(&serde_json::json!({
-                "model": model_for_thread,
-                "messages": [{"role": "user", "content": prompt_owned}],
-                "temperature": 0.3,
-            }))
-            .send()
-            .map_err(|e| e.to_string())?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body: serde_json::Value = resp.json().unwrap_or(serde_json::json!({}));
-            let msg = body["error"]["message"].as_str().unwrap_or("unknown");
-            let hint = if msg.to_lowercase().contains("authentication")
-                || msg.to_lowercase().contains("not found")
-            {
-                " — check that your key is an OpenRouter key (starts with sk-or-v1-) and is active."
-            } else {
-                ""
-            };
-            return Err(format!("OpenRouter {}: {}{}", status, msg, hint));
-        }
-
-        let json: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
-        json["choices"][0]["message"]["content"]
-            .as_str()
-            .map(String::from)
-            .ok_or_else(|| format!("unexpected response: {json}"))
-    });
-    let result = handle
-        .join()
-        .unwrap_or_else(|_| Err("correction thread panicked".into()));
-
-    match result {
-        Ok(corrected) => {
-            // Save as new version
-            let meta_path = recordings_dir().join(format!("{id}.json"));
-            let mut meta: serde_json::Value = std::fs::read_to_string(&meta_path)
-                .ok()
-                .and_then(|m| serde_json::from_str(&m).ok())
-                .unwrap_or(serde_json::json!({}));
-            if meta.get("versions").and_then(|v| v.as_array()).is_none() {
-                meta["versions"] = serde_json::json!([]);
-            }
-            let versions = meta["versions"].as_array_mut().unwrap();
-            versions.push(serde_json::json!({
-                "type": "llm_correction",
-                "text": corrected,
-                "marked": marked,
-                "model": model,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            }));
-            let _ = std::fs::write(&meta_path, serde_json::to_string(&meta).unwrap_or_default());
-            (
-                "200 OK".into(),
-                "application/json".into(),
-                serde_json::json!({"ok":true,"text":corrected}).to_string(),
-            )
-        }
-        Err(e) => (
-            "502 Bad Gateway".into(),
-            "application/json".into(),
-            serde_json::json!({"error": e}).to_string(),
+            serde_json::json!({"ok":true,"text":corrected}).to_string(),
         ),
+        Err(e) => {
+            let status = match &e {
+                ApiError::BadRequest(_) => "400 Bad Request",
+                _ => "502 Bad Gateway",
+            };
+            (
+                status.into(),
+                "application/json".into(),
+                serde_json::json!({"error": e.message()}).to_string(),
+            )
+        }
     }
 }
 
 fn api_config_get() -> (String, String, String) {
-    let has_key =
-        crate::traits::KeyringStore::get_api_key(&crate::keyring::ConfigFileKeyring).is_ok();
-    let has_correction_key = !crate::keyring::get_correction_key().is_empty();
-    let correction_model = crate::keyring::get_correction_model();
-    let json = serde_json::json!({
-        "lang": crate::keyring::get_language(),
-        "output_mode": crate::keyring::get_output_mode(),
-        "history_time_mode": crate::keyring::get_history_time_mode(),
-        "has_key": has_key,
-        "has_correction_key": has_correction_key,
-        "correction_model": correction_model,
-    })
-    .to_string();
-    ("200 OK".into(), "application/json".into(), json)
+    api_ok_json(&api::get_config())
 }
 
 fn api_config_post(body: &str) -> (String, String, String) {
-    let v: serde_json::Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(e) => {
-            return config_error(400, &format!("invalid JSON: {e}"));
-        }
-    };
-    if body.trim().is_empty() {
-        return config_error(400, "empty request body");
+    match api::save_config_from_json(body) {
+        Ok(()) => (
+            "200 OK".into(),
+            "application/json".into(),
+            r#"{"ok":true}"#.into(),
+        ),
+        Err(e) => api_error(e),
     }
-    if let Some(lang) = v.get("lang").and_then(|l| l.as_str()) {
-        if let Err(e) = crate::keyring::set_language(lang) {
-            return config_error(500, &e.to_string());
-        }
-    }
-    if let Some(mode) = v.get("output_mode").and_then(|m| m.as_str()) {
-        if let Err(e) = crate::keyring::set_output_mode(mode) {
-            return config_error(400, &e.to_string());
-        }
-    }
-    if let Some(mode) = v.get("history_time_mode").and_then(|m| m.as_str()) {
-        if let Err(e) = crate::keyring::set_history_time_mode(mode) {
-            return config_error(400, &e.to_string());
-        }
-    }
-    if let Some(key) = v.get("key").and_then(|k| k.as_str()) {
-        if !key.is_empty() {
-            if let Err(e) = crate::keyring::ConfigFileKeyring.set_api_key(key) {
-                return config_error(500, &e.to_string());
-            }
-        }
-    }
-    if let Some(ck) = v.get("correction_key").and_then(|k| k.as_str()) {
-        if !ck.is_empty() {
-            if let Err(e) = crate::keyring::set_correction_key(ck) {
-                return config_error(500, &e.to_string());
-            }
-        }
-    }
-    if let Some(cm) = v.get("correction_model").and_then(|m| m.as_str()) {
-        if let Err(e) = crate::keyring::set_correction_model(cm) {
-            return config_error(500, &e.to_string());
-        }
-    }
-    (
-        "200 OK".into(),
-        "application/json".into(),
-        r#"{"ok":true}"#.into(),
-    )
-}
-
-fn config_error(status: u16, message: &str) -> (String, String, String) {
-    let status_line = match status {
-        400 => "400 Bad Request",
-        _ => "500 Internal Server Error",
-    };
-    let json = serde_json::json!({ "ok": false, "error": message }).to_string();
-    (status_line.into(), "application/json".into(), json)
-}
-
-fn serve_audio(stream: &std::net::TcpStream, req: &str) {
-    let path = req.split_whitespace().nth(1).unwrap_or("");
-    let id = path
-        .strip_prefix("/api/recording/")
-        .unwrap_or("")
-        .trim_end_matches("/audio");
-    let raw_path = recordings_dir().join(format!("{id}.raw"));
-    let Ok(raw) = std::fs::read(&raw_path) else {
-        return;
-    };
-
-    let wav = encode_pcm_to_wav(&raw);
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        wav.len()
-    );
-    if let Ok(mut s) = stream.try_clone() {
-        let _ = s.write_all(header.as_bytes());
-        let _ = s.write_all(&wav);
-    }
-}
-
-fn encode_pcm_to_wav(pcm: &[u8]) -> Vec<u8> {
-    let data_len = pcm.len() as u32;
-    let sample_rate: u32 = 16000;
-    let bits_per_sample: u16 = 16;
-    let channels: u16 = 1;
-    let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
-    let block_align = channels * bits_per_sample / 8;
-
-    let mut wav = Vec::with_capacity(44 + pcm.len());
-    // RIFF header
-    wav.extend_from_slice(b"RIFF");
-    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
-    wav.extend_from_slice(b"WAVE");
-    // fmt chunk
-    wav.extend_from_slice(b"fmt ");
-    wav.extend_from_slice(&16u32.to_le_bytes());
-    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    wav.extend_from_slice(&channels.to_le_bytes());
-    wav.extend_from_slice(&sample_rate.to_le_bytes());
-    wav.extend_from_slice(&byte_rate.to_le_bytes());
-    wav.extend_from_slice(&block_align.to_le_bytes());
-    wav.extend_from_slice(&bits_per_sample.to_le_bytes());
-    // data chunk
-    wav.extend_from_slice(b"data");
-    wav.extend_from_slice(&data_len.to_le_bytes());
-    wav.extend_from_slice(pcm);
-    wav
 }
 
 fn api_audio(_path: &str) -> (String, String, String) {
@@ -651,78 +238,30 @@ fn api_audio(_path: &str) -> (String, String, String) {
     )
 }
 
-use std::sync::OnceLock;
-
-static MODELS_CACHE: OnceLock<String> = OnceLock::new();
-
-fn load_models_cache() {
-    let _ = MODELS_CACHE.get_or_init(|| {
-        let output = std::process::Command::new("curl")
-            .args(["-s", "--max-time", "10", "https://models.dev/api.json"])
-            .output();
-        match output {
-            Ok(o) if o.status.success() => {
-                let models = parse_models_json(&o.stdout);
-                serde_json::Value::Array(models).to_string()
-            }
-            _ => serde_json::json!({"error": "Failed to fetch models"}).to_string(),
-        }
-    });
-}
-
-fn parse_models_json(data: &[u8]) -> Vec<serde_json::Value> {
-    let json: serde_json::Value = match serde_json::from_slice(data) {
-        Ok(v) => v,
-        Err(_) => return vec![],
-    };
-    let providers = match json.as_object() {
-        Some(p) => p,
-        None => return vec![],
-    };
-    let mut models = Vec::new();
-    let recommended = [
-        "deepseek/deepseek-chat-v4",
-        "deepseek/deepseek-chat",
-        "openai/gpt-4o-mini",
-        "x-ai/grok-2",
-    ];
-
-    for (pid, pdata) in providers {
-        let pname = pdata.get("name").and_then(|n| n.as_str()).unwrap_or(pid);
-        if let Some(pmodels) = pdata.get("models").and_then(|m| m.as_object()) {
-            for (mid, mdata) in pmodels {
-                let name = mdata.get("name").and_then(|n| n.as_str()).unwrap_or(mid);
-                if name.len() >= 100 {
-                    continue;
-                }
-                let pricing = mdata
-                    .get("pricing")
-                    .and_then(|p| p.get("input"))
-                    .and_then(|i| i.as_str())
-                    .unwrap_or("?");
-                let full_id = format!("{pid}/{mid}");
-                let rec = recommended.contains(&full_id.as_str());
-                models.push(serde_json::json!({
-                    "id": full_id,
-                    "name": format!("{name} ({pname})"),
-                    "pricing": format!("${pricing}/1M"),
-                    "rec": rec,
-                }));
-            }
-        }
-    }
-    models.sort_by(|a, b| match (a["rec"].as_bool(), b["rec"].as_bool()) {
-        (Some(true), Some(false)) => std::cmp::Ordering::Less,
-        (Some(false), Some(true)) => std::cmp::Ordering::Greater,
-        _ => a["id"].as_str().cmp(&b["id"].as_str()),
-    });
-    models
-}
-
 fn api_models() -> (String, String, String) {
-    load_models_cache();
-    let data = MODELS_CACHE.get().cloned().unwrap_or_else(|| "[]".into());
-    ("200 OK".into(), "application/json".into(), data)
+    (
+        "200 OK".into(),
+        "application/json".into(),
+        api::models_json(),
+    )
+}
+
+fn serve_audio(stream: &std::net::TcpStream, req: &str) {
+    let path = req.split_whitespace().nth(1).unwrap_or("");
+    let id = recording_id_from_path(path, "/audio");
+    let Ok(raw) = api::read_audio_pcm(&id) else {
+        return;
+    };
+
+    let wav = api::encode_pcm_to_wav(&raw);
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        wav.len()
+    );
+    if let Ok(mut s) = stream.try_clone() {
+        let _ = s.write_all(header.as_bytes());
+        let _ = s.write_all(&wav);
+    }
 }
 
 fn ui_url(addr: std::net::SocketAddr, start_path: &str) -> String {
@@ -751,18 +290,10 @@ fn serve_listener(listener: TcpListener) {
     }
 }
 
-fn prune_junk_recordings_on_ui_start() {
-    let dir = recordings_dir();
-    let n = crate::recording::prune_junk_recordings(&dir);
-    if n > 0 {
-        tracing::info!("pruned {n} junk recording(s) from {}", dir.display());
-    }
-}
-
 /// Start the embedded UI API server on a background thread. Returns the URL to load (for Tauri / tests).
 pub fn spawn_server(start_path: &str) -> anyhow::Result<String> {
-    prune_junk_recordings_on_ui_start();
-    std::thread::spawn(load_models_cache);
+    api::prune_junk_on_ui_start();
+    std::thread::spawn(api::preload_models_cache);
 
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
@@ -834,7 +365,7 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 pub fn run_at(start_path: &str) -> anyhow::Result<()> {
-    prune_junk_recordings_on_ui_start();
+    api::prune_junk_on_ui_start();
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     let base_url = ui_url(addr, "");
@@ -967,21 +498,6 @@ mod tests {
     }
 
     #[test]
-    fn test_waveform_i16_min_no_panic() {
-        init_tests();
-        // i16::MIN.abs() panics in debug mode — must handle safely
-        let samples: Vec<u8> = vec![0x00u8, 0x80u8, 0x00, 0x00]; // i16::MIN then 0
-        let dir = recordings_dir();
-        std::fs::create_dir_all(&dir).ok();
-        let path = dir.join("test_min.raw");
-        std::fs::write(&path, &samples).ok();
-        let wf = waveform_data(&path);
-        assert_eq!(wf.len(), 200);
-        assert!(wf.iter().all(|v| *v >= 0.0));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
     fn test_api_config_post_accepts_wtype() {
         init_tests();
         let body =
@@ -1045,7 +561,7 @@ mod tests {
     #[test]
     fn test_recording_get_works_with_new_format() {
         init_tests();
-        let dir = recordings_dir();
+        let dir = api::recordings_dir();
         std::fs::create_dir_all(&dir).ok();
         let raw = vec![0u8; 32000];
         let id = "2026-06-01_15-13-17_25414ms";

@@ -7,6 +7,7 @@ pub fn env_compat(primary: &str, legacy: &str) -> Option<String> {
         .or_else(|| std::env::var(legacy).ok())
 }
 
+pub mod api;
 pub mod app;
 pub mod audio;
 pub mod audio_validation;
@@ -22,6 +23,7 @@ pub mod traits;
 pub mod tray;
 mod tray_theme;
 pub mod web;
+pub mod xai_oauth;
 
 pub use state::{AppState, Command, Event};
 pub use traits::*;

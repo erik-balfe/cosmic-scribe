@@ -8,9 +8,6 @@
   let activeVersion = $state(initialVersion || 0);
   let editing = $state(false);
   let editText = $state('');
-  let mode = $state('red');
-  let marks = $state({});
-  let correcting = $state(false);
   let errMsg = $state('');
   let audio = $state(null);
   let playing = $state(false);
@@ -32,7 +29,6 @@
     data = await r.json();
     versions = data.versions || [];
     editText = data.text || '';
-    marks = {};
     activeVersion = initialVersion || 0;
     if (activeVersion > 0 && versions[activeVersion - 1]) {
       editText = versions[activeVersion - 1].text || '';
@@ -43,37 +39,7 @@
   function switchVersion(idx) {
     activeVersion = idx;
     editText = idx === 0 ? (data.text || '') : (versions[idx - 1]?.text || '');
-    marks = {};
     onnavigate?.('detail', detailId, idx);
-  }
-
-  function markSelection() {
-    const sel = window.getSelection();
-    if (!sel.rangeCount || sel.isCollapsed) return;
-    const text = sel.toString();
-    if (!text.trim()) return;
-
-    const words = editText.split(/([\s.,!?;:'"()\-\u2014\u2013]+)/g).filter(w => w.length > 0);
-    const selectedStart = editText.indexOf(text);
-    if (selectedStart < 0) return;
-    const selectedEnd = selectedStart + text.length;
-
-    let pos = 0;
-    for (let i = 0; i < words.length; i++) {
-      const w = words[i];
-      const wordStart = pos;
-      const wordEnd = pos + w.length;
-      if (wordEnd > selectedStart && wordStart < selectedEnd) {
-        if (mode === 'red') {
-          marks[i] = marks[i] === 'wrong' ? '' : 'wrong';
-        } else {
-          marks[i] = marks[i] === 'correct' ? '' : 'correct';
-        }
-      }
-      pos = wordEnd;
-    }
-    marks = { ...marks };
-    sel.removeAllRanges();
   }
 
   async function saveEdit() {
@@ -91,26 +57,6 @@
         if (el) el.scrollLeft = el.scrollWidth;
       });
     }
-  }
-
-  async function correctWithAI() {
-    const allWrong = [], allCorrect = [];
-    const words = editText.split(/([\s.,!?;:'"()\-\u2014\u2013]+)/g).filter(w => w.length > 0);
-    for (const [idx, type] of Object.entries(marks)) {
-      if (type === 'wrong') allWrong.push(words[parseInt(idx)]);
-      if (type === 'correct') allCorrect.push(words[parseInt(idx)]);
-    }
-    correcting = true;
-    errMsg = '';
-    try {
-      const r = await fetch(`/api/recording/${detailId}/correct`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: editText, marked: allWrong, kept: allCorrect })
-      });
-      if (r.ok) { await load(); switchVersion(versions.length); }
-      else { const err = await r.json(); errMsg = err.text || err.error || 'Correction failed'; }
-    } catch { errMsg = 'Network error'; }
-    correcting = false;
   }
 
   function deleteEntry() {
@@ -154,8 +100,6 @@
     audio.currentTime = pct * audioDur;
   }
 
-  let words = $derived(editText.split(/([\s.,!?;:'"()\-\u2014\u2013]+)/g).filter(w => w.length > 0));
-  let hasMarks = $derived(Object.values(marks).some(m => m));
   let timeLabels = $derived(data ? recordingTimeLabels(data.ts, timeMode) : { primary: '', tooltip: '' });
 
   function formatTime(s) {
@@ -252,27 +196,10 @@
   </div>
 
   <div class="toolbar">
-    <button class="mode-btn" class:active={mode === 'red'} onclick={() => mode = 'red'}>
-      <span class="dot red"></span>Wrong
-    </button>
-    <button class="mode-btn" class:active={mode === 'green'} onclick={() => mode = 'green'}>
-      <span class="dot green"></span>Correct
-    </button>
-    {#if hasMarks}
-      <button onclick={() => marks = {}}>Clear marks</button>
-    {/if}
     <span class="grow"></span>
     <button onclick={() => editing = !editing}>{editing ? 'Preview' : 'Edit'}</button>
-    {#if hasMarks}
-      <button class="correct-btn" onclick={correctWithAI} disabled={correcting} title="Experimental — results vary">
-        {correcting ? '...' : 'Fix with AI'} <span class="beta">beta</span>
-      </button>
-    {/if}
   </div>
 
-  {#if !editing}
-    <div class="hint">Select text to mark as {mode === 'red' ? 'wrong (click again to remove)' : 'correct'}</div>
-  {/if}
   {#if errMsg}
     <div class="error-msg">{errMsg}</div>
   {/if}
@@ -282,11 +209,8 @@
       <textarea bind:value={editText} rows={8}></textarea>
       <button class="save-btn" onclick={saveEdit}>Save edit</button>
     {:else}
-      <div class="markable-text" onmouseup={markSelection}>
-        {#each words as word, i (`${i}-${word}`)}
-          {@const m = marks[i] || ''}
-          <span class="word" class:wrong={m === 'wrong'} class:correct={m === 'correct'}>{word}</span>
-        {/each}
+      <div class="plain-text">
+        {editText || 'No transcript yet.'}
       </div>
     {/if}
   </div>
@@ -329,18 +253,6 @@
     background: none; color: var(--text-muted); cursor: pointer; font-size: 13px;
   }
   .toolbar button:hover { border-color: var(--border); color: var(--text); }
-  .mode-btn { display: flex; align-items: center; gap: 6px; }
-  .mode-btn.active { background: var(--blue-soft); border-color: var(--border); color: var(--text); }
-  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-  .dot.red { background: var(--accent); }
-  .dot.green { background: #4caf50; }
-  .correct-btn { background: var(--blue-soft) !important; border-color: var(--border) !important; color: var(--blue) !important; }
-  .correct-btn:disabled { opacity: 0.4; }
-  .beta {
-    font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-    color: var(--warning); background: rgba(244, 184, 106, 0.2); padding: 1px 5px; border-radius: 3px;
-    margin-left: 4px; vertical-align: middle;
-  }
 
   .no-transcript {
     background: var(--surface-raised);
@@ -369,11 +281,7 @@
     padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 8px;
   }
 
-  .markable-text { line-height: 1.9; font-size: 15px; color: var(--text-muted); user-select: text; }
-  .markable-text::selection { background: rgba(233, 69, 96, 0.25); }
-  .word { padding: 1px 2px; border-radius: 3px; }
-  .word.wrong { background: rgba(233, 69, 96, 0.35); }
-  .word.correct { background: rgba(76, 175, 80, 0.3); }
+  .plain-text { line-height: 1.7; font-size: 15px; color: var(--text-muted); white-space: pre-wrap; }
 
   textarea {
     width: 100%; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);

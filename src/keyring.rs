@@ -1,7 +1,8 @@
-// ── API key storage ───────────────────────────────────────────
+// ── API key + speech config storage ───────────────────────────
 // Stores app config in ~/.local/share/cosmic-scribe/
-//   api-key — xAI API key, AES-256-GCM encrypted (0600)
-//   lang    — STT language code
+//   api-key      — speech API Bearer key, AES-256-GCM encrypted (0600)
+//   lang         — STT language code
+//   stt-endpoint — full STT URL (default: xAI REST dialect)
 //
 // Encryption: AES-256-GCM, key derived via HKDF-SHA256 from /etc/machine-id.
 // No extra secrets to manage — machine-id is unique per install.
@@ -55,7 +56,7 @@ fn derive_key() -> Result<[u8; 32]> {
     Ok(key)
 }
 
-fn encrypt(plaintext: &[u8]) -> Result<Vec<u8>> {
+pub fn encrypt_bytes(plaintext: &[u8]) -> Result<Vec<u8>> {
     let key = derive_key()?;
     let cipher =
         Aes256Gcm::new_from_slice(&key).map_err(|_| anyhow::anyhow!("invalid key length"))?;
@@ -74,7 +75,7 @@ fn encrypt(plaintext: &[u8]) -> Result<Vec<u8>> {
     Ok(result)
 }
 
-fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt_bytes(data: &[u8]) -> Result<Vec<u8>> {
     if data.len() < NONCE_LEN + 1 {
         anyhow::bail!("encrypted data too short");
     }
@@ -90,9 +91,51 @@ fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
         .map_err(|_| anyhow::anyhow!("decryption failed — wrong machine? key corrupted?"))
 }
 
-fn is_encrypted(data: &[u8]) -> bool {
+fn encrypt(plaintext: &[u8]) -> Result<Vec<u8>> {
+    encrypt_bytes(plaintext)
+}
+
+fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
+    decrypt_bytes(data)
+}
+
+pub fn looks_encrypted(data: &[u8]) -> bool {
     // Encrypted format: binary with nonce prefix. Plaintext is ASCII.
     data.len() > NONCE_LEN && !data.iter().all(u8::is_ascii)
+}
+
+fn is_encrypted(data: &[u8]) -> bool {
+    looks_encrypted(data)
+}
+
+/// True if a non-empty API key file exists (does not count OAuth-only sessions).
+pub fn has_stored_api_key() -> bool {
+    let path = key_path();
+    path.is_file() && fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false)
+}
+
+/// Local-only: env key, OAuth store present, or encrypted key file.
+///
+/// **Never** performs OAuth refresh / network. Use for Idle→Record gates and
+/// Settings `has_key` so the daemon UI path cannot hang on HTTP.
+pub fn has_any_speech_credentials() -> bool {
+    if std::env::var("COSMIC_SCRIBE_API_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
+        return true;
+    }
+    if crate::env_compat("COSMIC_SCRIBE_XAI_API_KEY", "VOICE_INPUT_XAI_API_KEY")
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
+        return true;
+    }
+    if crate::xai_oauth::is_logged_in() {
+        return true;
+    }
+    has_stored_api_key()
 }
 
 pub fn get_language() -> String {
@@ -127,7 +170,8 @@ pub fn get_output_mode() -> String {
         "wtype" | "always" | "auto" => "wtype",
         _ => "wtype",
     };
-    if mode != raw {
+    // Persist normalized legacy values only — never rewrite a valid file on read.
+    if mode != raw && matches!(raw.as_str(), "never" | "always" | "auto" | "") {
         let _ = fs::write(output_mode_path(), mode);
     }
     mode.to_string()
@@ -137,9 +181,15 @@ pub fn set_output_mode(mode: &str) -> Result<()> {
     let mode = match mode.trim() {
         "clipboard" => "clipboard",
         "wtype" => "wtype",
+        "" => anyhow::bail!("output mode must be 'wtype' or 'clipboard', got empty"),
         other => anyhow::bail!("output mode must be 'wtype' or 'clipboard', got '{other}'"),
     };
-    fs::write(output_mode_path(), mode)?;
+    let path = output_mode_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, mode)?;
+    tracing::info!("output mode set to '{mode}' ({})", path.display());
     Ok(())
 }
 
@@ -165,6 +215,54 @@ pub fn set_history_time_mode(mode: &str) -> Result<()> {
         other => anyhow::bail!("history time mode must be 'relative' or 'absolute', got '{other}'"),
     };
     fs::write(history_time_mode_path(), mode)?;
+    Ok(())
+}
+
+/// Default STT endpoint (xAI REST dialect: multipart `POST` with `format` + `language` + `file`).
+pub const DEFAULT_STT_ENDPOINT: &str = "https://api.x.ai/v1/stt";
+
+fn stt_endpoint_path() -> PathBuf {
+    config_dir().join("stt-endpoint")
+}
+
+/// Full speech-to-text URL. Env `COSMIC_SCRIBE_STT_URL` wins over the saved value.
+///
+/// Empty / missing → [`DEFAULT_STT_ENDPOINT`]. Same **request dialect** as xAI
+/// (`/v1/stt` shape). OpenAI Whisper uses a different path and form fields —
+/// see `docs/STT_PROVIDERS.md` (contributor work, not a base-URL swap).
+pub fn get_stt_endpoint() -> String {
+    if let Some(url) = crate::env_compat("COSMIC_SCRIBE_STT_URL", "VOICE_INPUT_STT_URL") {
+        let url = url.trim().to_string();
+        if !url.is_empty() {
+            return url;
+        }
+    }
+    fs::read_to_string(stt_endpoint_path())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_STT_ENDPOINT.to_string())
+}
+
+/// Persist STT endpoint. Empty string resets to the default (deletes the file).
+pub fn set_stt_endpoint(url: &str) -> Result<()> {
+    let url = url.trim();
+    let path = stt_endpoint_path();
+    if url.is_empty() || url == DEFAULT_STT_ENDPOINT {
+        if path.is_file() {
+            let _ = fs::remove_file(&path);
+        }
+        tracing::info!("STT endpoint reset to default ({DEFAULT_STT_ENDPOINT})");
+        return Ok(());
+    }
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        anyhow::bail!("STT endpoint must be an http(s) URL");
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, url)?;
+    tracing::info!("STT endpoint set to '{url}' ({})", path.display());
     Ok(())
 }
 
@@ -224,17 +322,45 @@ pub fn set_correction_model(model: &str) -> Result<()> {
 pub struct ConfigFileKeyring;
 
 impl KeyringStore for ConfigFileKeyring {
+    fn has_local_credentials(&self) -> bool {
+        has_any_speech_credentials()
+    }
+
+    /// Resolve a Bearer credential for cloud STT.
+    ///
+    /// Priority:
+    /// 1. `COSMIC_SCRIBE_API_KEY` (generic) or `COSMIC_SCRIBE_XAI_API_KEY` / legacy env
+    /// 2. OAuth access token (SuperGrok / Premium+ plan, when signed in)
+    /// 3. Stored API key file
     fn get_api_key(&self) -> Result<String> {
+        if let Ok(key) = std::env::var("COSMIC_SCRIBE_API_KEY") {
+            if !key.is_empty() {
+                return Ok(key);
+            }
+        }
         if let Some(key) = crate::env_compat("COSMIC_SCRIBE_XAI_API_KEY", "VOICE_INPUT_XAI_API_KEY")
         {
             if !key.is_empty() {
                 return Ok(key);
             }
         }
+
+        // Prefer subscription OAuth when available (quota, not API spend).
+        if crate::xai_oauth::is_logged_in() {
+            match crate::xai_oauth::access_token() {
+                Ok(tok) if !tok.is_empty() => return Ok(tok),
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!("xAI OAuth token unavailable: {e}; falling back to API key");
+                }
+            }
+        }
+
         let path = key_path();
         let data = fs::read(&path).with_context(|| {
             format!(
-                "no API key found at {} or in COSMIC_SCRIBE_XAI_API_KEY / VOICE_INPUT_XAI_API_KEY env",
+                "no speech credentials — set an API key (`--set-key` / Settings) \
+                 or run `cosmic-scribe --login` (SuperGrok / Premium+). Tried OAuth store and {}",
                 path.display()
             )
         })?;

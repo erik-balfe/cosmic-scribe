@@ -6,17 +6,47 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+/// Compressed audio produced **during** capture (progressive Opus) for fast STT upload.
+#[derive(Clone, Debug)]
+pub struct PreEncodedAudio {
+    pub bytes: Vec<u8>,
+    pub file_name: String,
+    pub mime: String,
+    pub codec: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct AudioData {
+    /// Raw PCM s16le (kept for local history / playback).
     pub bytes: Vec<u8>,
     pub sample_rate: u32,
     pub channels: u16,
     pub duration_ms: u64,
+    /// If set, STT upload should use this instead of encoding after stop.
+    pub pre_encoded: Option<PreEncodedAudio>,
+}
+
+impl AudioData {
+    pub fn pcm(bytes: Vec<u8>, sample_rate: u32, channels: u16, duration_ms: u64) -> Self {
+        Self {
+            bytes,
+            sample_rate,
+            channels,
+            duration_ms,
+            pre_encoded: None,
+        }
+    }
 }
 
 #[async_trait::async_trait]
 pub trait AudioCapture: Send {
     async fn start(&mut self) -> Result<()>;
     async fn stop(&mut self) -> Result<AudioData>;
+
+    /// Optional live capture buffer (diagnostics only; not used to abort takes).
+    fn monitor_buffer(&self) -> Option<std::sync::Arc<std::sync::Mutex<Vec<u8>>>> {
+        None
+    }
 }
 
 /// Word-level timing from xAI REST STT (`words[]` in API response).
@@ -100,6 +130,13 @@ pub trait KeyringStore: Send + Sync {
     fn get_api_key(&self) -> Result<String>;
     fn set_api_key(&self, key: &str) -> Result<()>;
     fn clear(&self) -> Result<()>;
+
+    /// Local-only: may a STT request be attempted? Must not hit the network.
+    ///
+    /// Production: env key / OAuth store present / key file. Never OAuth refresh.
+    fn has_local_credentials(&self) -> bool {
+        self.get_api_key().map(|k| !k.is_empty()).unwrap_or(false)
+    }
 }
 
 pub trait TrayController: Send {

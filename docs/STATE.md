@@ -1,61 +1,38 @@
 # STATE — Cosmic Scribe
 
-Last updated: 2026-06-14
+Last updated: 2026-08-03
 
-**Docs index:** [`docs/README.md`](README.md) · **Tasks:** [`docs/BACKLOG.md`](BACKLOG.md) · **Shortcut:** [`docs/SHORTCUT.md`](SHORTCUT.md) · **Tauri:** [`docs/TAURI.md`](TAURI.md)
+**Docs index:** [`docs/README.md`](README.md) · **Tasks:** [`docs/BACKLOG.md`](BACKLOG.md)
 
-Internal engineering log (not marketing copy). Keep in sync with `docs/KARAOKE.md` and `docs/RELEASE.md`.
+Internal engineering log (not the public README). Product / VAD notes for maintainers: **local only** — `docs/LOCAL/` (via `.git/info/exclude`).
 
-## Done
+## Snapshot
 
-- Architecture: single binary, CLI modes (`--daemon`, `--record-once`, `--trigger`, `--file-input`, `--settings`, `--configure`, `--install`, …)
-- Pure state machine: Idle / Recording / Transcribing / Inserting / Error
-- IO behind traits — **44+ tests**
-- **Batch REST** xAI STT (`POST /v1/stt`) — full file after stop, not WebSocket streaming
-- STT retry + timeout; tray capsule: red = recording, blue = processing (STT + paste); ignore tray click during STT/insert
-- **Text output**: wtype default (`docs/OUTPUT.md`); optional clipboard-only in Settings
-- Per-recording artifacts: `.raw`, `.txt`, **`.stt.json`** (word timestamps + raw API JSON)
-- Unix socket IPC, AES-256-GCM API keys, language config
-- Tray SNI (Cosmic Scribe title); History + Settings → **cosmic-scribe-gui** (Tauri prod)
-- Web UI: history list, detail (waveform, versions, user edit, Copy + toast)
-- Lifecycle: `--install`, `--update`, `--start`, `--stop`, `--status`; login autostart via `com.cosmic-scribe.service` on `graphical-session.target` (cosmic-paste pattern); daemon singleton lock; deferred tray connect
-- AI correction via OpenRouter (beta)
+- **Product:** system speech input on COSMIC (near-zero UI: shortcut + tray).
+- **Auth:** Bearer API key first-class; optional SuperGrok / Premium+ plan OAuth.
+- **STT:** progressive Opus + batch REST (xAI dialect default; endpoint configurable). Streaming STT not a product goal.
+- **VAD / silence cut:** **not shipped** — no RMS hard-reject (false-positive safe). Plan: F13, design in `docs/LOCAL/VAD-SILENCE.md`.
+- **Public README:** user-facing only — what / why / how.
 
-### Verified with real xAI API
+## Shipped (master tip)
 
-| Test | Result |
+| Area | Notes |
 |------|--------|
-| `--record-once` lang=ru | Full Russian paragraph |
-| `--file-input` | English, full cycle |
-| Empty/short audio | Rejected |
-| Daemon + trigger | IPC works |
+| PTT + tray | Red / blue / idle |
+| Progressive Opus | Encode during capture; REST upload |
+| OAuth + API key | Warm token; local-only credential gates |
+| Native GUI | libcosmic History/Settings when installed |
+| STT endpoint setting | Same dialect only; OpenAI Whisper = F7 |
+| Path-safe recording IDs | Local API sanitization |
+| Nested-runtime re-transcribe fix | Dedicated thread for STT from GUI |
 
-## Beta / WIP
+## Next (post-ship or next minor)
 
-- LLM correction (mark words → Fix with AI): intermittent quality
-- OpenRouter model list via models.dev + curl cache
+1. **F13** silence cutting (upload path only; conservative VAD) — design locked in LOCAL docs  
+2. **F7** OpenAI Whisper / multi-dialect STT  
+3. Version bump + push + tag when releasing  
+4. Optional: native GUI window screenshots for README  
 
-## Next (release track)
+## Release posture
 
-See `docs/RELEASE.md`, `docs/DISTRIBUTION.md`, `docs/OUTREACH.md`.
-
-- GitHub public when ready
-- Fedora COPR / release binary
-- **Karaoke UI** — plan in `docs/KARAOKE.md` (storage done, UI not started)
-
-## Low
-
-- VAD, configurable input device
-- Re-transcribe from history — **done** (`POST /api/recording/:id/transcribe`)
-- Optional: WebSocket STT only if we add *live* captions (not for dictation paste)
-
-## Changed decisions
-
-| Old | New | Why |
-|-----|-----|-----|
-| `wtype` with transcript text | Clipboard + Ctrl+V | Char-by-char looked like slow streaming |
-| STT: `text` only | `.stt.json` with `words[]` | Karaoke + seek-by-word later |
-| libsecret | Config file + AES-GCM | No D-Bus dep |
-| cpal | arecord | No ALSA headers |
-| Tray blink loop | Solid icons | System-wide lag on COSMIC |
-| History viewer TODO | Web UI shipped | Done |
+See [RELEASE.md](RELEASE.md). Master tip is **feature-complete for a 0.3.x publish** after `./scripts/check.sh` and maintainer smoke test; not pushed until you ask.

@@ -18,12 +18,17 @@ There is no single “COSMIC app registry” like GNOME Circle. Practical path: 
 
 ## Message angles
 
-- Built on COSMIC daily; tray shows idle, recording (red), recognizing (blue). Independent project — see [BRANDING.md](BRANDING.md).
-- Shortcut dictation into any app; history for replay/edit.
-- Requires xAI API key; honest about cloud STT.
+1. **Near-zero UI** — one shortcut + tray mic; no app window required.  
+2. **Keyboard replacement** — dictate into any field on the desktop.  
+3. **SuperGrok OAuth** (recommended) **or** API key — both supported.  
+4. **Fast after stop** — encode while you speak; paste in about a second or two.  
+5. Independent COSMIC project — [BRANDING.md](BRANDING.md). Honest: audio goes to xAI.
+
+Avoid: live-caption / streaming STT hype, “another ChatGPT,” comparing poorly without trying the tray loop.
 
 ## Before posting
 
-- [ ] Repo public, one clean commit, screenshots in README
-- [ ] Short screen recording (tray → speak → text)
-- [x] Rename crate/binary to `cosmic-scribe`
+- [ ] Repo public; `master` pushed with clean README  
+- [ ] Short screen recording: shortcut → red → speak → blue → paste  
+- [x] Rename crate/binary to `cosmic-scribe`  
+- [ ] Topics / one-liner for r/pop_os and COSMIC channels

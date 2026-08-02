@@ -12,7 +12,7 @@ use crate::audio_validation;
 use crate::logging::LogCtx;
 use crate::state::{self, AppState, Command, Event};
 use crate::traits::*;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -23,6 +23,7 @@ fn recordings_dir() -> std::path::PathBuf {
 
 fn save_recording(bytes: &[u8], duration_ms: u64) -> std::path::PathBuf {
     let ts = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let duration_ms = audio_validation::duration_ms_from_pcm(bytes).max(duration_ms);
     let name = format!("{}_{}ms.raw", ts, duration_ms);
     let path = recordings_dir().join(&name);
     if let Err(e) = std::fs::write(&path, bytes) {
@@ -58,7 +59,7 @@ pub(crate) fn save_stt_artifacts(path: &std::path::Path, result: &SttResult) {
 fn notify_clipboard_ready() {
     let _ = std::process::Command::new("notify-send")
         .arg("Cosmic Scribe")
-        .arg("Transcript copied — paste into your field (Ctrl+V or Ctrl+Shift+V in terminal)")
+        .arg("Text ready — paste with Ctrl+V (Ctrl+Shift+V in a terminal)")
         .status();
 }
 
@@ -69,7 +70,9 @@ fn stt_timeout() -> Duration {
     crate::env_compat("COSMIC_SCRIBE_STT_TIMEOUT_MS", "VOICE_INPUT_STT_TIMEOUT_MS")
         .and_then(|s| s.parse::<u64>().ok())
         .map(Duration::from_millis)
-        .unwrap_or_else(|| Duration::from_secs(60))
+        // Long dictation + server time needs headroom; was 60s and looked like
+        // "never finishes" when encode deadlocked or upload was slow.
+        .unwrap_or_else(|| Duration::from_secs(180))
 }
 
 pub struct App {
@@ -86,10 +89,13 @@ pub struct App {
     done_tx: Option<oneshot::Sender<()>>,
 
     last_recording_path: Option<std::path::PathBuf>,
+    /// Progressive Opus (or other) from capture — attached to STT AudioData on Transcribe.
+    last_pre_encoded: Option<crate::traits::PreEncodedAudio>,
     /// Bumped on cancel during transcribing so in-flight STT results are dropped.
     transcribe_generation: Arc<AtomicU64>,
     /// True after stop until audio bytes are received (handles late AudioCaptured).
     awaiting_audio: bool,
+    is_capturing: Arc<AtomicBool>,
 }
 
 impl App {
@@ -116,8 +122,10 @@ impl App {
             done_tx: None,
 
             last_recording_path: None,
+            last_pre_encoded: None,
             transcribe_generation: Arc::new(AtomicU64::new(0)),
             awaiting_audio: false,
+            is_capturing: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -139,11 +147,9 @@ impl App {
         self.tray = tray;
     }
 
+    /// Local-only credential presence — never hits the network (OAuth refresh).
     fn api_key_configured(&self) -> bool {
-        self.keyring
-            .get_api_key()
-            .map(|k| !k.is_empty())
-            .unwrap_or(false)
+        self.keyring.has_local_credentials()
     }
 
     pub async fn process_event(&mut self, event: Event) {
@@ -153,8 +159,9 @@ impl App {
         {
             self.execute_commands(vec![
                 Command::ShowNotification {
-                    title: "API key required".into(),
-                    body: "Set your xAI API key in Settings before recording.".into(),
+                    title: "Set up speech access".into(),
+                    body: "Add an API key in Settings, or sign in with SuperGrok / X Premium+ (cosmic-scribe --login)."
+                        .into(),
                 },
                 Command::OpenSettings,
             ])
@@ -221,33 +228,52 @@ impl App {
                     if let Err(e) = self.audio.start().await {
                         self.log.audio_error(&e.to_string());
                         self.event_tx.send(Event::Error(e.to_string())).ok();
+                    } else {
+                        self.is_capturing.store(true, Ordering::SeqCst);
+                        // Warm OAuth while user speaks so stop→STT never pays refresh latency.
+                        crate::xai_oauth::warm_token_background();
+                        // Soft device check only (muted / 0% volume). Never abort on RMS
+                        // “silence” — false positives kill real takes mid-dictation.
+                        if let Some(warning) = audio_validation::mic_capture_warning() {
+                            let _ = std::process::Command::new("notify-send")
+                                .arg("Cosmic Scribe")
+                                .arg(&warning)
+                                .status();
+                        }
                     }
                 }
 
-                StopCapture => match self.audio.stop().await {
-                    Ok(data) => {
-                        self.log.audio_captured(data.bytes.len(), data.duration_ms);
+                StopCapture => {
+                    self.is_capturing.store(false, Ordering::SeqCst);
+                    match self.audio.stop().await {
+                        Ok(data) => {
+                            self.log.audio_captured(data.bytes.len(), data.duration_ms);
+                            // Carry progressive Opus into Transcribe (Event only holds PCM).
+                            self.last_pre_encoded = data.pre_encoded;
 
-                        match audio_validation::validate_audio(&data.bytes, data.duration_ms) {
-                            Ok(()) => {
-                                self.event_tx
-                                    .send(Event::AudioCaptured {
-                                        bytes: data.bytes,
-                                        duration_ms: data.duration_ms,
-                                    })
-                                    .ok();
-                            }
-                            Err(err) => {
-                                self.log.validation_error(&err.to_string());
-                                self.event_tx.send(Event::Error(err.to_string())).ok();
+                            match audio_validation::validate_audio(&data.bytes, data.duration_ms) {
+                                Ok(()) => {
+                                    self.event_tx
+                                        .send(Event::AudioCaptured {
+                                            bytes: data.bytes,
+                                            duration_ms: data.duration_ms,
+                                        })
+                                        .ok();
+                                }
+                                Err(err) => {
+                                    self.last_pre_encoded = None;
+                                    self.log.validation_error(&err.to_string());
+                                    self.event_tx.send(Event::Error(err.to_string())).ok();
+                                }
                             }
                         }
+                        Err(e) => {
+                            self.last_pre_encoded = None;
+                            self.log.audio_error(&e.to_string());
+                            self.event_tx.send(Event::Error(e.to_string())).ok();
+                        }
                     }
-                    Err(e) => {
-                        self.log.audio_error(&e.to_string());
-                        self.event_tx.send(Event::Error(e.to_string())).ok();
-                    }
-                },
+                }
 
                 Transcribe(data) => {
                     self.awaiting_audio = false;
@@ -259,26 +285,20 @@ impl App {
                         }
                     };
 
-                    match self.keyring.get_api_key() {
-                        Err(e) => {
-                            self.log.stt_error(&format!("missing API key: {e}"));
-                            drop_orphan(&self.last_recording_path);
-                            self.last_recording_path = None;
-                            self.event_tx
-                                .send(Event::Error("API key not configured".into()))
-                                .ok();
-                            continue;
-                        }
-                        Ok(key) if key.is_empty() => {
-                            self.log.stt_error("API key is empty");
-                            drop_orphan(&self.last_recording_path);
-                            self.last_recording_path = None;
-                            self.event_tx
-                                .send(Event::Error("API key not configured".into()))
-                                .ok();
-                            continue;
-                        }
-                        Ok(_) => {}
+                    // Local presence only — never block the event loop on OAuth refresh.
+                    // Real bearer resolve happens inside STT (spawn_blocking).
+                    if !self.keyring.has_local_credentials() {
+                        self.log.stt_error("no speech credentials configured");
+                        drop_orphan(&self.last_recording_path);
+                        self.last_recording_path = None;
+                        self.last_pre_encoded = None;
+                        self.event_tx
+                            .send(Event::Error(
+                                "No speech credentials — add an API key in Settings or run --login"
+                                    .into(),
+                            ))
+                            .ok();
+                        continue;
                     }
 
                     self.log.transcription_request();
@@ -288,6 +308,7 @@ impl App {
                         sample_rate: 16000,
                         channels: 1,
                         duration_ms: self.last_duration_ms,
+                        pre_encoded: self.last_pre_encoded.take(),
                     };
 
                     let gen = self.transcribe_generation.load(Ordering::SeqCst);
@@ -360,7 +381,9 @@ impl App {
                             if let Some(ref p) = path {
                                 crate::recording::remove_recording_files(p);
                             }
-                            let _ = tx.send(Event::Error("no speech detected".into()));
+                            // Empty STT result (API returned no text) — not local VAD.
+                            let _ = tx
+                                .send(Event::Error("empty transcript from speech service".into()));
                         } else if !last_err.is_empty() {
                             let msg = format!(
                                 "STT failed after {} attempts: {last_err}",
@@ -446,8 +469,18 @@ mod tests {
     }
 
     impl MockCapture {
+        fn tone_pcm(num_bytes: usize) -> Vec<u8> {
+            let samples = num_bytes / 2;
+            (0..samples)
+                .flat_map(|i| {
+                    let s = (i as i32 * 7919 % 8000 + 500) as i16;
+                    s.to_le_bytes()
+                })
+                .collect()
+        }
+
         fn with_duration(duration_ms: u64) -> Self {
-            let bytes = vec![0u8; (duration_ms as usize) * 32]; // 32 bytes/ms for PCM16 16kHz
+            let bytes = Self::tone_pcm((duration_ms as usize) * 32);
             Self {
                 fail_start: false,
                 data: bytes,
@@ -476,12 +509,12 @@ mod tests {
             }
         }
         async fn stop(&mut self) -> anyhow::Result<AudioData> {
-            Ok(AudioData {
-                bytes: self.data.clone(),
-                sample_rate: 16000,
-                channels: 1,
-                duration_ms: self.duration_ms,
-            })
+            Ok(AudioData::pcm(
+                self.data.clone(),
+                16000,
+                1,
+                self.duration_ms,
+            ))
         }
     }
 

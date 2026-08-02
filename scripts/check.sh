@@ -7,10 +7,10 @@ echo "==> rustfmt"
 cargo fmt --all -- --check
 
 echo "==> clippy"
-cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --exclude cosmic-scribe-gui-native --all-targets -- -D warnings
 
 echo "==> cargo test"
-cargo test
+cargo test --workspace --exclude cosmic-scribe-gui-native
 
 echo "==> web lint"
 cd web
@@ -20,6 +20,6 @@ npm run build
 cd ..
 
 echo "==> cargo build --release"
-cargo build --release
+cargo build --release --workspace --exclude cosmic-scribe-gui-native
 
 echo "All checks passed."

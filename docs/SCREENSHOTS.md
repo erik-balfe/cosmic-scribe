@@ -2,6 +2,9 @@
 
 Assets for the [README](../README.md) and GitHub release page.
 
+**README currently uses tray icons only** (`tray-*.png`) — that matches the near-zero-UI story.  
+`app-*.png` are optional (older Tauri chrome); re-capture with native GUI before using them in marketing.
+
 ## Automated capture (recommended)
 
 ```bash

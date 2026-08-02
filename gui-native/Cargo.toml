@@ -1,0 +1,28 @@
+[package]
+name = "cosmic-scribe-gui-native"
+version = "0.1.0"
+edition = "2021"
+description = "Cosmic Scribe — native libcosmic UI"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "cosmic-scribe-gui-native"
+path = "src/main.rs"
+
+[[bin]]
+name = "cosmic-scribe-gui-native-debug"
+path = "src/bin/debug.rs"
+required-features = ["debug-gui"]
+
+[features]
+debug-gui = []
+
+[dependencies]
+cosmic-scribe = { path = ".." }
+chrono = { version = "0.4", features = ["serde"] }
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+default-features = false
+features = ["winit", "tokio", "wgpu", "wayland", "single-instance", "desktop"]

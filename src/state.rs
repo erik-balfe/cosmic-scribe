@@ -117,8 +117,10 @@ pub fn transition(state: &AppState, event: &Event) -> (AppState, Vec<Command>) {
             vec![
                 SetTrayState("idle".into()),
                 ShowNotification {
-                    title: "Insertion failed".into(),
-                    body: format!("Text was copied but injection failed: {msg}"),
+                    title: "Could not type text".into(),
+                    body: format!(
+                        "Copied to clipboard, but typing into the focused field failed: {msg}"
+                    ),
                 },
             ],
         ),
