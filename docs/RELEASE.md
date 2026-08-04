@@ -1,6 +1,6 @@
 # OSS release readiness
 
-Last reviewed: 2026-08-03
+Last reviewed: 2026-08-05
 
 **Docs:** [../README.md](../README.md) · [BACKLOG.md](BACKLOG.md)
 
@@ -52,8 +52,8 @@ Last reviewed: 2026-08-03
 
 1. `./scripts/check.sh` green (core + web; gui-native excluded from clippy/test in CI)  
 2. Smoke: sign-in or API key, one dictation, History re-transcribe, Settings save  
-3. Bump `Cargo.toml` version if needed (already `0.3.3` on tip as of 2026-08-03)  
-4. `jj` commit if dirty · push `master` · tag `vX.Y.Z` · push tags  
+3. Bump `Cargo.toml` version (**0.4.0** for this feature ship; **v0.3.3 already exists** on GitHub)  
+4. `jj` commit if dirty · push `master` · tag `v0.4.0` · push tags  
 5. Verify CI release artifacts + formula  
 
 ## Pre-ship residual risks (accepted or deferred)

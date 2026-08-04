@@ -4,7 +4,7 @@ Task tracker for bugs, features, and research. Update status as work progresses.
 
 **Statuses:** `open` · `in_progress` · `done` · `deferred`
 
-Last updated: 2026-08-03
+Last updated: 2026-08-05
 
 **Doc index:** [docs/README.md](README.md)
 

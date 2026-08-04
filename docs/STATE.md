@@ -1,6 +1,6 @@
 # STATE — Cosmic Scribe
 
-Last updated: 2026-08-03
+Last updated: 2026-08-05
 
 **Docs index:** [`docs/README.md`](README.md) · **Tasks:** [`docs/BACKLOG.md`](BACKLOG.md)
 
@@ -35,4 +35,5 @@ Internal engineering log (not the public README). Product / VAD notes for mainta
 
 ## Release posture
 
-See [RELEASE.md](RELEASE.md). Master tip is **feature-complete for a 0.3.x publish** after `./scripts/check.sh` and maintainer smoke test; not pushed until you ask.
+See [RELEASE.md](RELEASE.md). Tip is **v0.4.0** (user-facing: native UI, OAuth, progressive STT, endpoint config).  
+`v0.3.3` is already on GitHub — do not retag 0.3.3. Pre-publish: rebase onto `master@origin` done; push + `v0.4.0` tag when maintainer asks.
