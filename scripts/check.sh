@@ -6,11 +6,11 @@ cd "$(dirname "$0")/.."
 echo "==> rustfmt"
 cargo fmt --all -- --check
 
-echo "==> clippy"
-cargo clippy --workspace --exclude cosmic-scribe-gui-native --all-targets -- -D warnings
+echo "==> clippy (daemon; matches CI)"
+cargo clippy -p cosmic-scribe --all-targets -- -D warnings
 
-echo "==> cargo test"
-cargo test --workspace --exclude cosmic-scribe-gui-native
+echo "==> cargo test (daemon; matches CI)"
+cargo test -p cosmic-scribe
 
 echo "==> web lint"
 cd web
@@ -19,7 +19,14 @@ npm run lint
 npm run build
 cd ..
 
-echo "==> cargo build --release"
-cargo build --release --workspace --exclude cosmic-scribe-gui-native
+echo "==> cargo build --release (daemon; matches CI)"
+cargo build --release -p cosmic-scribe
+
+# Optional local GUIs (not in GitHub CI — need GTK/WebKit/COSMIC).
+if [[ "${COSMIC_SCRIBE_CHECK_GUI:-}" == "1" ]]; then
+  echo "==> clippy/test GUI crates (COSMIC_SCRIBE_CHECK_GUI=1)"
+  cargo clippy -p cosmic-scribe-gui --all-targets -- -D warnings
+  cargo test -p cosmic-scribe-gui
+fi
 
 echo "All checks passed."

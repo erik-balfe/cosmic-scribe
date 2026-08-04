@@ -1,6 +1,8 @@
 [workspace]
 members = [".", "gui", "gui-native"]
-default-members = [".", "gui"]
+# Core daemon only by default — GUI crates need system libs (GTK/WebKit/COSMIC).
+# Build explicitly: `cargo build -p cosmic-scribe-gui` / `cosmic-scribe-gui-native`.
+default-members = ["."]
 resolver = "2"
 
 [package]
