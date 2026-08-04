@@ -3,9 +3,9 @@ class CosmicScribe < Formula
   homepage "https://github.com/erik-balfe/cosmic-scribe"
   license "MIT"
   # Builds from master tarball (no separate git clone). Repo must be public on GitHub.
-  url "https://github.com/erik-balfe/cosmic-scribe/archive/refs/tags/v0.3.3.tar.gz"
-  version "0.3.3"
-  sha256 "14dfeb4781d6b1f1f92cf7eb0ed68c813a90ccf711d5741d00b48cafaea5bb0f"
+  url "https://github.com/erik-balfe/cosmic-scribe/archive/refs/tags/v0.4.0.tar.gz"
+  version "0.4.0"
+  sha256 "5645946f1831b1e2cc1c587fbe5cc7a0a47704d7c725b7b09ad782fdb50c022c"
 
   depends_on "rust" => :build
 
