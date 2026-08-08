@@ -77,6 +77,10 @@ async fn main() -> anyhow::Result<()> {
         return trigger_mode().await;
     }
 
+    if args.iter().any(|a| a == "--cancel") {
+        return cancel_mode().await;
+    }
+
     if args.iter().any(|a| a == "--uninstall") {
         let purge = args.iter().any(|a| a == "--purge");
         return lifecycle::uninstall(purge);
@@ -194,6 +198,7 @@ fn print_usage() {
     eprintln!();
     eprintln!("Dictation:");
     eprintln!("  --trigger            Toggle recording on running daemon");
+    eprintln!("  --cancel             Abort recording or STT (bind e.g. Ctrl+Shift+Space)");
     eprintln!("  --record-once        Record, transcribe, insert text, exit");
     eprintln!("  --file-input=<path>  Transcribe pre-recorded raw PCM");
     eprintln!();
@@ -217,6 +222,22 @@ async fn trigger_mode() -> anyhow::Result<()> {
     ipc::send_toggle().await?;
     tracing::info!("toggle sent");
     Ok(())
+}
+
+async fn cancel_mode() -> anyhow::Result<()> {
+    match ipc::send_cancel().await {
+        Ok(()) => {
+            tracing::info!("cancel sent");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!(
+                "Could not cancel — is the daemon running? ({e})\n\
+                 Try: cosmic-scribe --status"
+            );
+            Err(e)
+        }
+    }
 }
 
 async fn file_input(path: &str) -> anyhow::Result<()> {

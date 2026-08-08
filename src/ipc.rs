@@ -1,9 +1,11 @@
 // ── Unix socket IPC ───────────────────────────────────────────
-// Enables `cosmic-scribe --trigger` to talk to running daemon.
+// Enables `cosmic-scribe --trigger` / `--cancel` to talk to running daemon.
 // Socket path: $XDG_RUNTIME_DIR/cosmic-scribe.sock
+//
+// Wire protocol: one line per connection, commands TOGGLE | CANCEL.
 
 use anyhow::Context;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 
@@ -14,7 +16,7 @@ pub fn socket_path() -> std::path::PathBuf {
         .join(format!("{}.sock", crate::APP_SLUG))
 }
 
-/// Start listening for --trigger connections. Sends "TOGGLE\n" messages as events.
+/// Start listening for CLI/desktop shortcut connections.
 pub async fn spawn_listener(tx: mpsc::UnboundedSender<crate::state::Event>) {
     let path = socket_path();
     let _ = std::fs::remove_file(&path);
@@ -43,18 +45,26 @@ pub async fn spawn_listener(tx: mpsc::UnboundedSender<crate::state::Event>) {
 }
 
 async fn handle_connection(stream: UnixStream, tx: mpsc::UnboundedSender<crate::state::Event>) {
-    let mut buf = [0u8; 16];
-    stream.readable().await.ok();
-    match stream.try_read(&mut buf) {
-        Ok(n) => {
-            let msg = String::from_utf8_lossy(&buf[..n]);
-            if msg.trim() == "TOGGLE" {
-                tracing::info!("IPC: received toggle");
-                tx.send(crate::state::Event::Toggle).ok();
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    match reader.read_line(&mut line).await {
+        Ok(0) => {}
+        Ok(_) => {
+            let cmd = line.trim();
+            match cmd {
+                "TOGGLE" => {
+                    tracing::info!("IPC: received toggle");
+                    tx.send(crate::state::Event::Toggle).ok();
+                }
+                "CANCEL" => {
+                    tracing::info!("IPC: received cancel");
+                    tx.send(crate::state::Event::Cancel).ok();
+                }
+                other if !other.is_empty() => {
+                    tracing::warn!("IPC: unknown command {other:?}");
+                }
+                _ => {}
             }
-        }
-        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-            // No data yet — client might have disconnected
         }
         Err(e) => {
             tracing::warn!("IPC read error: {e}");
@@ -69,14 +79,15 @@ fn legacy_socket_path() -> std::path::PathBuf {
         .join("voice-input.sock")
 }
 
-/// Connect to running daemon and send toggle command.
-pub async fn send_toggle() -> anyhow::Result<()> {
+/// Connect to running daemon and send a one-line command (`TOGGLE` / `CANCEL`).
+pub async fn send_command(cmd: &str) -> anyhow::Result<()> {
+    let line = format!("{cmd}\n");
     let paths = [socket_path(), legacy_socket_path()];
     let mut last_err = None;
     for path in paths {
         match UnixStream::connect(&path).await {
             Ok(mut stream) => {
-                stream.write_all(b"TOGGLE\n").await?;
+                stream.write_all(line.as_bytes()).await?;
                 stream.flush().await?;
                 return Ok(());
             }
@@ -85,4 +96,14 @@ pub async fn send_toggle() -> anyhow::Result<()> {
     }
     let (path, e) = last_err.expect("at least one socket path");
     Err(e).with_context(|| format!("failed to connect to IPC socket at {}", path.display()))
+}
+
+/// Connect to running daemon and send toggle command.
+pub async fn send_toggle() -> anyhow::Result<()> {
+    send_command("TOGGLE").await
+}
+
+/// Connect to running daemon and send cancel (abort recording / STT).
+pub async fn send_cancel() -> anyhow::Result<()> {
+    send_command("CANCEL").await
 }

@@ -93,8 +93,10 @@ pub struct App {
     last_pre_encoded: Option<crate::traits::PreEncodedAudio>,
     /// Bumped on cancel during transcribing so in-flight STT results are dropped.
     transcribe_generation: Arc<AtomicU64>,
-    /// True after stop until audio bytes are received (handles late AudioCaptured).
+    /// True after intentional stop until audio bytes are received (handles late AudioCaptured).
     awaiting_audio: bool,
+    /// Set when user cancels mid-record so StopCapture drops PCM instead of STT.
+    discard_next_audio: bool,
     is_capturing: Arc<AtomicBool>,
 }
 
@@ -125,6 +127,7 @@ impl App {
             last_pre_encoded: None,
             transcribe_generation: Arc::new(AtomicU64::new(0)),
             awaiting_audio: false,
+            discard_next_audio: false,
             is_capturing: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -173,7 +176,16 @@ impl App {
             self.last_duration_ms = *duration_ms;
         }
 
-        // StopCapture can finish after a stray cancel; still run STT if we were waiting.
+        // User cancel: never STT this take (even if StopCapture already running).
+        if matches!(&event, Event::AudioCaptured { .. }) && self.discard_next_audio {
+            self.discard_next_audio = false;
+            self.awaiting_audio = false;
+            self.last_pre_encoded = None;
+            tracing::info!("discarding audio after cancel");
+            return;
+        }
+
+        // StopCapture can finish after intentional stop; still run STT if we were waiting.
         if matches!(self.state, AppState::Idle)
             && self.awaiting_audio
             && matches!(&event, Event::AudioCaptured { .. })
@@ -183,19 +195,21 @@ impl App {
 
         let from = self.state.clone();
 
-        if matches!(&event, Event::Cancel) && matches!(from, AppState::Transcribing) {
-            self.transcribe_generation.fetch_add(1, Ordering::SeqCst);
-            self.awaiting_audio = false;
+        if matches!(&event, Event::Cancel) {
+            self.on_user_cancel(&from);
         }
 
         let (new_state, commands) = state::transition(&self.state, &event);
         self.state = new_state;
 
         if matches!(self.state, AppState::Transcribing) && matches!(from, AppState::Recording) {
-            self.awaiting_audio = true;
+            if !self.discard_next_audio {
+                self.awaiting_audio = true;
+            }
         }
         if matches!(self.state, AppState::Idle) {
             self.awaiting_audio = false;
+            // Keep discard_next_audio until StopCapture / late AudioCaptured / next StartCapture.
         }
         self.log.state_transition(&from, &self.state);
 
@@ -219,12 +233,38 @@ impl App {
         }
     }
 
+    /// Side effects for user cancel (shortcut, tray, CLI) — before state transition.
+    fn on_user_cancel(&mut self, from: &AppState) {
+        match from {
+            AppState::Recording => {
+                self.discard_next_audio = true;
+                self.awaiting_audio = false;
+                self.last_pre_encoded = None;
+            }
+            AppState::Transcribing => {
+                self.transcribe_generation.fetch_add(1, Ordering::SeqCst);
+                self.awaiting_audio = false;
+                self.discard_next_audio = true;
+                self.last_pre_encoded = None;
+                if let Some(p) = self.last_recording_path.take() {
+                    crate::recording::remove_recording_files(&p);
+                    tracing::info!("removed cancelled recording {}", p.display());
+                }
+            }
+            AppState::Inserting => {
+                self.last_pre_encoded = None;
+            }
+            _ => {}
+        }
+    }
+
     async fn execute_commands(&mut self, commands: Vec<Command>) {
         use Command::*;
 
         for cmd in commands {
             match cmd {
                 StartCapture => {
+                    self.discard_next_audio = false;
                     if let Err(e) = self.audio.start().await {
                         self.log.audio_error(&e.to_string());
                         self.event_tx.send(Event::Error(e.to_string())).ok();
@@ -245,9 +285,20 @@ impl App {
 
                 StopCapture => {
                     self.is_capturing.store(false, Ordering::SeqCst);
+                    let discard = self.discard_next_audio;
                     match self.audio.stop().await {
                         Ok(data) => {
                             self.log.audio_captured(data.bytes.len(), data.duration_ms);
+                            if discard {
+                                self.discard_next_audio = false;
+                                self.last_pre_encoded = None;
+                                self.awaiting_audio = false;
+                                tracing::info!(
+                                    "stop after cancel — discarded {} bytes",
+                                    data.bytes.len()
+                                );
+                                continue;
+                            }
                             // Carry progressive Opus into Transcribe (Event only holds PCM).
                             self.last_pre_encoded = data.pre_encoded;
 
@@ -269,8 +320,11 @@ impl App {
                         }
                         Err(e) => {
                             self.last_pre_encoded = None;
+                            self.discard_next_audio = false;
                             self.log.audio_error(&e.to_string());
-                            self.event_tx.send(Event::Error(e.to_string())).ok();
+                            if !discard {
+                                self.event_tx.send(Event::Error(e.to_string())).ok();
+                            }
                         }
                     }
                 }
@@ -639,6 +693,13 @@ mod tests {
         assert_eq!(app.current_state(), &AppState::Recording);
         app.process_event(Event::Cancel).await;
         assert_eq!(app.current_state(), &AppState::Idle);
+        assert!(!app.awaiting_audio);
+        app.process_event(Event::AudioCaptured {
+            bytes: vec![0u8; 64_000],
+            duration_ms: 2000,
+        })
+        .await;
+        assert_eq!(app.current_state(), &AppState::Idle);
     }
 
     #[tokio::test]
@@ -647,8 +708,30 @@ mod tests {
         app.process_event(Event::Toggle).await;
         app.process_event(Event::Toggle).await;
         assert_eq!(app.current_state(), &AppState::Transcribing);
+        let gen_before = app.transcribe_generation.load(Ordering::SeqCst);
         app.process_event(Event::Cancel).await;
         assert_eq!(app.current_state(), &AppState::Idle);
+        assert!(app.transcribe_generation.load(Ordering::SeqCst) > gen_before);
+        app.process_event(Event::AudioCaptured {
+            bytes: vec![0u8; 64_000],
+            duration_ms: 2000,
+        })
+        .await;
+        assert_eq!(app.current_state(), &AppState::Idle);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_then_new_recording_works() {
+        let mut app = make_app();
+        app.process_event(Event::Toggle).await;
+        app.process_event(Event::Cancel).await;
+        assert_eq!(app.current_state(), &AppState::Idle);
+        app.process_event(Event::Toggle).await;
+        assert_eq!(app.current_state(), &AppState::Recording);
+        assert!(!app.discard_next_audio);
+        app.process_event(Event::Toggle).await;
+        assert_eq!(app.current_state(), &AppState::Transcribing);
+        assert!(app.awaiting_audio);
     }
 
     #[tokio::test]

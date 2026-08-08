@@ -42,7 +42,7 @@ Optional **History** and **Settings** windows (libcosmic / native COSMIC look wh
 
 ## Features
 
-- **Global shortcut** — bind `cosmic-scribe --trigger` once ([guide](docs/SHORTCUT.md))
+- **Global shortcuts** — bind `cosmic-scribe --trigger` (start/stop) and `--cancel` ([guide](docs/SHORTCUT.md))
 - **Tray mic** — red / blue status; left-click to record when idle
 - **API key for speech** — Settings, `--set-key`, or `COSMIC_SCRIBE_API_KEY` (Bearer key)
 - **Configurable STT endpoint** — Settings or `COSMIC_SCRIBE_STT_URL` (same dialect; default xAI)
@@ -85,7 +85,13 @@ Recording is blocked until an API key or sign-in is set up.
 
 ### 4. Shortcut
 
-**Settings → Keyboard → Custom shortcuts** → command like `~/.local/bin/cosmic-scribe --trigger` → e.g. **Super+Shift+Space**.  
+**Settings → Keyboard → Custom shortcuts:**
+
+| Command | Suggested keys |
+|---------|----------------|
+| `~/.local/bin/cosmic-scribe --trigger` | **Ctrl+Space** — start / stop |
+| `~/.local/bin/cosmic-scribe --cancel` | **Ctrl+Shift+Space** — abort take |
+
 Details: [docs/SHORTCUT.md](docs/SHORTCUT.md)
 
 ### 5. Dictate
@@ -96,7 +102,8 @@ Details: [docs/SHORTCUT.md](docs/SHORTCUT.md)
 
 ### Tips
 
-- **Long break mid-thought?** Stop recording (shortcut). The take is transcribed and saved; start a new one when you return. No separate pause mode.  
+- **Started by mistake?** **Cancel** shortcut (`--cancel`, e.g. Ctrl+Shift+Space) or tray → Cancel — no paste, no STT.  
+- **Long break mid-thought?** Stop recording (trigger again). The take is transcribed and saved; start a new one when you return. No separate pause mode.  
 - **Thinking pauses still go to the API** for now (silence cutting is planned later). We do **not** discard takes for “quiet audio” — soft speech and pauses must not be treated as errors.  
 - **Network glitch?** History → open the take → **Transcribe** again (audio stays on disk).  
 - **Terminals:** Settings → output mode **clipboard** only, then paste yourself.

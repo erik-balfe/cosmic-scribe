@@ -107,10 +107,11 @@ Recording is blocked until an API key **or** sign-in is set up.
 
 ### Global shortcut
 
-See [SHORTCUT.md](SHORTCUT.md). Command example:
+See [SHORTCUT.md](SHORTCUT.md). Examples:
 
 ```text
-~/.local/bin/cosmic-scribe --trigger
+~/.local/bin/cosmic-scribe --trigger    # start / stop (e.g. Ctrl+Space)
+~/.local/bin/cosmic-scribe --cancel     # abort take (e.g. Ctrl+Shift+Space)
 ```
 
 ### Output mode
