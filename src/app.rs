@@ -202,10 +202,11 @@ impl App {
         let (new_state, commands) = state::transition(&self.state, &event);
         self.state = new_state;
 
-        if matches!(self.state, AppState::Transcribing) && matches!(from, AppState::Recording) {
-            if !self.discard_next_audio {
-                self.awaiting_audio = true;
-            }
+        if matches!(self.state, AppState::Transcribing)
+            && matches!(from, AppState::Recording)
+            && !self.discard_next_audio
+        {
+            self.awaiting_audio = true;
         }
         if matches!(self.state, AppState::Idle) {
             self.awaiting_audio = false;
