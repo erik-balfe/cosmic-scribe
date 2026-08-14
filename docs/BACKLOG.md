@@ -8,7 +8,7 @@ Last updated: 2026-08-15
 
 **Doc index:** [docs/README.md](README.md)
 
-**Priority:** ship polish. F8 OAuth, F10 native UI, F11 progressive Opus **done** on master tip (unpushed until release).
+**Priority:** product landing. Everyday / OAuth-first README is live (v0.5.0). Opt-in usage numbers shipped. Next: F13 / F7 / F14.
 
 ---
 
@@ -17,7 +17,8 @@ Last updated: 2026-08-15
 | ID | Status | Summary | Notes |
 |----|--------|---------|-------|
 | **F8** | **done** | **xAI OAuth for STT (SuperGrok / Premium+)** | Own device-code login; encrypted `xai-oauth.json`; API key fallback. CLI: `--login` / `--logout` / `--no-browser`. |
-| F9 | open | Local usage meter + soft/hard budgets | Complements OAuth rate limits. |
+| F9 | open | Local usage meter + soft/hard budgets | Complements OAuth rate limits. Opt-in anonymous counts (F15) are separate. |
+| F15 | **done** | Opt-in privacy-preserving usage numbers | Off by default. Aggregates only (latency, duration buckets, auth mode, actions). No text/audio/id. |
 | R3 | open | Other providers’ OAuth | Mirror F8 when a second backend offers subscription OAuth. |
 
 ---
@@ -48,7 +49,8 @@ Last updated: 2026-08-15
 | F11 | **done** | Progressive Opus encode during capture | Finalize ~ms; REST upload OGG; `.raw` kept |
 | F12 | **wontfix** | Streaming STT (WebSocket) as core path | Not the product — PTT wants final paste; REST is the right (and cheaper list) path |
 | F13 | open | **Silence cutting (VAD)** on upload path only | **Not shipped.** No RMS hard-reject (false-positive safe). Future: conservative cut before STT; full `.raw` kept. Design: `docs/LOCAL/VAD-SILENCE.md`. No pause button. |
-| F14 | open | **Readable sentences / punctuation (esp. Russian)** | Root: xAI REST STT — `format=true` is **ITN** (numbers/currency), **not** punctuation restore. Punctuation is in-model; RU often weaker than EN. **No default LLM rewrite** (Grok web tidy/full-rewrite replaces rare words). Optional later: conservative punct-only pass, never silent full rewrite. |
+| F15 | **done** | Opt-in anonymous usage numbers | Off by default; Settings toggle; no text/audio/id |
+| F14 | open | **Readable sentences / punctuation (esp. Russian)** | Root: xAI REST — `format=true` is **ITN**, not punctuation. Punctuation is in-model (attached to word tokens). Local history 2026-08-15: **RU 84 takes, 30% no `.?!`** (first capital 51%); **EN 280 takes, 6% no `.?!`** (first capital 99.6%). Worst: RU 20–60s (~36% word-bags). Intra-take: one 155s RU dictation had **0 punct for 0–20s and 60–100s**, then normal commas/periods — ASR bursts, not our paste path. **No default LLM rewrite** (Grok web tidy/full-rewrite; our leftover OpenRouter “AI fix” is the same class, **0 uses**, UI removed). Optional later: punct-only pass, off by default. |
 
 ---
 

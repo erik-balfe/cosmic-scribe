@@ -93,7 +93,7 @@ The core is deliberately simple and testable:
 - `src/state.rs` — pure state machine (5 states, 8 events). No IO.
 - `src/traits.rs` — traits for `AudioCapture`, `SttClient`, `TextInjector`, `KeyringStore`, etc. Easy to mock.
 - `src/app.rs` — main event loop tying everything together.
-- `src/web.rs` — embedded HTTP + WebSocket server + Svelte assets. Also handles OpenRouter correction calls.
+- `src/web.rs` — embedded HTTP + WebSocket server + Svelte assets. Leftover `POST /correct` (OpenRouter) is not on the paste path.
 - `src/main.rs`, `src/tray.rs`, `src/ipc.rs`, etc. — platform glue, tray (ksni), Unix socket IPC.
 
 Key design goals:
@@ -150,10 +150,10 @@ Areas where help is especially appreciated:
 - Documentation improvements
 - Reliability of the daemon (auto-restart, logging)
 
-## Beta / experimental areas (as of now)
+## Out of scope unless discussed first
 
-- LLM word correction via OpenRouter + model picker
-- These are recent additions and quality/reliability is not yet production-ready. Focus PRs on the stable core unless discussing in an issue first.
+- Default LLM “tidy / rewrite” of transcripts (loses rare words). Optional punctuation-only is **F14**, off by default.
+- Leftover OpenRouter History “AI fix” API — do not revive as the default paste path.
 
 ## Questions / feedback
 

@@ -65,6 +65,10 @@ pub struct AppConfig {
     pub auth_mode: String,
     pub has_correction_key: bool,
     pub correction_model: String,
+    /// Opt-in anonymous usage numbers (default false).
+    pub analytics_opt_in: bool,
+    /// User-visible snapshot of the same aggregates a maintainer would see.
+    pub analytics_summary: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -76,6 +80,7 @@ pub struct ConfigUpdate {
     pub key: Option<String>,
     pub correction_key: Option<String>,
     pub correction_model: Option<String>,
+    pub analytics_opt_in: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -376,8 +381,7 @@ pub fn transcribe_recording(id: &str) -> Result<TranscribeResult, ApiError> {
     // Local presence only — avoid blocking the GUI/event path on OAuth refresh.
     if !crate::keyring::has_any_speech_credentials() {
         return Err(ApiError::BadRequest(
-            "No speech credentials — add an API key in Settings or run cosmic-scribe --login"
-                .into(),
+            crate::product_copy::no_credentials_error().into(),
         ));
     }
 
@@ -540,6 +544,8 @@ pub fn get_config() -> AppConfig {
         auth_mode: crate::xai_oauth::auth_status_label().to_string(),
         has_correction_key: !crate::keyring::get_correction_key().is_empty(),
         correction_model: crate::keyring::get_correction_model(),
+        analytics_opt_in: crate::analytics::default_store().is_enabled(),
+        analytics_summary: crate::analytics::default_store().summary_line(),
     }
 }
 
@@ -591,6 +597,11 @@ pub fn save_config(update: &ConfigUpdate) -> Result<(), ApiError> {
     if let Some(cm) = update.correction_model.as_deref() {
         crate::keyring::set_correction_model(cm).map_err(|e| ApiError::Internal(e.to_string()))?;
     }
+    if let Some(on) = update.analytics_opt_in {
+        crate::analytics::default_store()
+            .set_enabled(on)
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    }
     Ok(())
 }
 
@@ -623,6 +634,7 @@ pub fn save_config_from_json(body: &str) -> Result<(), ApiError> {
             .get("correction_model")
             .and_then(|m| m.as_str())
             .map(String::from),
+        analytics_opt_in: v.get("analytics_opt_in").and_then(|b| b.as_bool()),
     };
     save_config(&update)
 }
@@ -728,6 +740,73 @@ mod tests {
             ..Default::default()
         };
         assert!(save_config(&update).is_ok());
+    }
+
+    #[test]
+    fn analytics_opt_in_defaults_off_and_persists_via_config() {
+        init_tests();
+        let _ = crate::analytics::default_store().set_enabled(false);
+        let before = get_config();
+        assert!(
+            !before.analytics_opt_in,
+            "analytics must default off: {}",
+            before.analytics_summary
+        );
+        assert!(
+            before
+                .analytics_summary
+                .to_ascii_lowercase()
+                .contains("off")
+                || before
+                    .analytics_summary
+                    .to_ascii_lowercase()
+                    .contains("nothing")
+        );
+        save_config(&ConfigUpdate {
+            analytics_opt_in: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+        let on = get_config();
+        assert!(on.analytics_opt_in);
+        assert!(on.analytics_summary.to_ascii_lowercase().contains("on"));
+        save_config(&ConfigUpdate {
+            analytics_opt_in: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(!get_config().analytics_opt_in);
+    }
+
+    #[test]
+    fn retranscribe_without_creds_uses_signin_first_copy() {
+        init_tests();
+        let prev_a = std::env::var("COSMIC_SCRIBE_API_KEY").ok();
+        let prev_b = std::env::var("COSMIC_SCRIBE_XAI_API_KEY").ok();
+        let prev_c = std::env::var("VOICE_INPUT_XAI_API_KEY").ok();
+        std::env::remove_var("COSMIC_SCRIBE_API_KEY");
+        std::env::remove_var("COSMIC_SCRIBE_XAI_API_KEY");
+        std::env::remove_var("VOICE_INPUT_XAI_API_KEY");
+
+        let dir = recordings_dir();
+        std::fs::create_dir_all(&dir).ok();
+        let id = "2026-01-01_00-00-00_1000ms";
+        std::fs::write(dir.join(format!("{id}.raw")), vec![0u8; 64]).unwrap();
+        let err = transcribe_recording(id).expect_err("must refuse without creds");
+        assert_eq!(err.message(), crate::product_copy::no_credentials_error());
+        assert!(crate::product_copy::sign_in_comes_before_api_key(
+            &err.message()
+        ));
+
+        if let Some(v) = prev_a {
+            std::env::set_var("COSMIC_SCRIBE_API_KEY", v);
+        }
+        if let Some(v) = prev_b {
+            std::env::set_var("COSMIC_SCRIBE_XAI_API_KEY", v);
+        }
+        if let Some(v) = prev_c {
+            std::env::set_var("VOICE_INPUT_XAI_API_KEY", v);
+        }
     }
 
     #[test]

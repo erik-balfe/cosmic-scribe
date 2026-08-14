@@ -61,11 +61,11 @@ Do **not** break the default xAI path or SuperGrok OAuth while adding dialects.
 
 ## `format=true` is not punctuation
 
-xAI REST: `format=true` + `language` enables **inverse text normalization** (spoken “one hundred dollars” → `$100`). It does **not** turn on a separate punctuation / sentence-restore API.
+xAI REST: `format=true` + `language` enables **inverse text normalization** (spoken “one hundred dollars” → `$100`). It does **not** turn on a separate punctuation / sentence-restore API. Docs: [Speech to Text](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text) — `format` “converts spoken numbers/currency to written form.” No `punctuate` flag.
 
-Punctuation and capitals come from the **ASR model itself**. Quality varies by language (English is typically stronger than Russian). There is no documented xAI REST flag for “add commas and periods.” Streaming STT has Smart Turn / endpointing for *when* a phrase ends — that is turn-taking, not written punctuation.
+Punctuation and capitals come from the **ASR model itself** (they show up *inside* `words[].text`, e.g. `"Okay,"` / `"понимаю,"`). Quality varies by language. Local history (2026-08-15): **~30% of Russian takes have no `.?!`** vs **~6% of English**; RU often starts lowercase. Streaming STT has Smart Turn / endpointing for *when* a phrase ends — that is turn-taking, not written punctuation.
 
-**Do not** add a default LLM “tidy / full rewrite” of the transcript. That is how Grok web chat post-processes voice; it often swaps rare-but-correct words for common ones. If we add post-process later, keep it **optional**, **punctuation-only**, and never replace content by default.
+**Do not** add a default LLM “tidy / full rewrite” of the transcript. That is how Grok web chat post-processes voice (off / tidy up / full rewrite); it often swaps rare-but-correct words for common ones. Cosmic Scribe still has a leftover OpenRouter History “AI fix” API (`correct_recording`) — same rewrite class; **not** on the paste path; do not revive as default. If we add post-process later (F14), keep it **optional**, **punctuation-only**, and never replace content by default.
 
 ## Product boundary
 

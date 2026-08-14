@@ -1,6 +1,6 @@
 # STATE — Cosmic Scribe
 
-Last updated: 2026-08-05
+Last updated: 2026-08-15 (v0.5.0)
 
 **Docs index:** [`docs/README.md`](README.md) · **Tasks:** [`docs/BACKLOG.md`](BACKLOG.md)
 
@@ -9,10 +9,11 @@ Internal engineering log (not the public README). Product / VAD notes for mainta
 ## Snapshot
 
 - **Product:** system speech input on COSMIC (near-zero UI: shortcut + tray).
-- **Auth:** Bearer API key first-class; optional SuperGrok / Premium+ plan OAuth.
+- **Auth:** SuperGrok / X Premium+ sign-in is the ordinary path; API key is a fallback.
 - **STT:** progressive Opus + batch REST (xAI dialect default; endpoint configurable). Streaming STT not a product goal.
 - **VAD / silence cut:** **not shipped** — no RMS hard-reject (false-positive safe). Plan: F13, design in `docs/LOCAL/VAD-SILENCE.md`.
-- **Public README:** user-facing only — what / why / how.
+- **Public README:** everyday / OAuth-first landing (sign-in above the fold).
+- **Analytics:** opt-in, off by default, aggregates only (F15).
 
 ## Shipped (master tip)
 
@@ -30,10 +31,9 @@ Internal engineering log (not the public README). Product / VAD notes for mainta
 
 1. **F13** silence cutting (upload path only; conservative VAD) — design locked in LOCAL docs  
 2. **F7** OpenAI Whisper / multi-dialect STT  
-3. Version bump + push + tag when releasing  
+3. **F14** optional punctuation-only pass (never default rewrite) — root cause measured 2026-08-15: in-model ASR, RU weaker than EN  
 4. Optional: native GUI window screenshots for README  
 
 ## Release posture
 
-See [RELEASE.md](RELEASE.md). Tip is **v0.4.0** (user-facing: native UI, OAuth, progressive STT, endpoint config).  
-`v0.3.3` is already on GitHub — do not retag 0.3.3. Pre-publish: rebase onto `master@origin` done; push + `v0.4.0` tag when maintainer asks.
+See [RELEASE.md](RELEASE.md). Tip is **v0.5.0** (OAuth-first README + opt-in analytics). Do not retag older versions.

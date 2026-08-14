@@ -1,9 +1,10 @@
 use crate::audio::AudioPlayer;
 use crate::time::{format_duration, recording_time_labels};
 use crate::ux::{
-    active_auth_detail, active_auth_title, base_transcript_label, history_after_probe,
-    history_has_more_after_page, history_preview, page_padding_tokens, settings_is_dirty,
-    settings_save_visible, should_save_edit, show_more_after_list, show_version_switcher,
+    access_how_speech_works, active_auth_detail, active_auth_title, analytics_item_description,
+    base_transcript_label, history_after_probe, history_has_more_after_page, history_preview,
+    page_padding_tokens, settings_is_dirty, settings_save_visible, should_save_edit,
+    show_more_after_list, show_version_switcher, sign_in_item_description, sign_in_item_title,
     stored_api_key_status, tray_capsule_rgb, tray_state_caption, tray_state_title,
     version_tab_label, HISTORY_PAGE_SIZE,
 };
@@ -123,6 +124,7 @@ pub enum Message {
     LogoutXai,
     RefreshAuth,
     ClearApiKey,
+    AnalyticsOptInChanged(bool),
     OpenUrl(String),
     SaveSettings,
     SettingsSaved,
@@ -180,6 +182,8 @@ struct SettingsForm {
     /// Pay-per-token key file present on disk.
     has_stored_api_key: bool,
     auth_mode: String,
+    analytics_opt_in: bool,
+    analytics_summary: String,
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +192,7 @@ struct SettingsSnapshot {
     output_mode: String,
     history_time_mode: String,
     stt_endpoint: String,
+    analytics_opt_in: bool,
 }
 
 impl Default for SettingsSnapshot {
@@ -198,6 +203,7 @@ impl Default for SettingsSnapshot {
             output_mode: "wtype".into(),
             history_time_mode: "relative".into(),
             stt_endpoint: cosmic_scribe::keyring::DEFAULT_STT_ENDPOINT.into(),
+            analytics_opt_in: false,
         }
     }
 }
@@ -213,6 +219,8 @@ impl Default for SettingsForm {
             has_key: false,
             has_stored_api_key: false,
             auth_mode: "none".into(),
+            analytics_opt_in: false,
+            analytics_summary: String::new(),
         }
     }
 }
@@ -233,6 +241,8 @@ impl App {
             &self.settings_saved_snap.history_time_mode,
             &self.settings_saved_snap.stt_endpoint,
             !self.settings.has_key,
+            self.settings.analytics_opt_in,
+            self.settings_saved_snap.analytics_opt_in,
         )
     }
 }
@@ -679,12 +689,15 @@ impl cosmic::Application for App {
                 self.settings.has_key = config.has_key;
                 self.settings.has_stored_api_key = api::has_stored_api_key();
                 self.settings.auth_mode = config.auth_mode.clone();
+                self.settings.analytics_opt_in = config.analytics_opt_in;
+                self.settings.analytics_summary = config.analytics_summary.clone();
                 self.settings.api_key.clear();
                 self.settings_saved_snap = SettingsSnapshot {
                     lang: config.lang.clone(),
                     output_mode: config.output_mode.clone(),
                     history_time_mode: config.history_time_mode.clone(),
                     stt_endpoint: config.stt_endpoint.clone(),
+                    analytics_opt_in: config.analytics_opt_in,
                 };
                 self.settings_loaded = true;
                 activate_segmented_value(
@@ -701,6 +714,7 @@ impl cosmic::Application for App {
             Message::LangChanged(v) => self.settings.lang = v,
             Message::ApiKeyChanged(v) => self.settings.api_key = v,
             Message::SttEndpointChanged(v) => self.settings.stt_endpoint = v,
+            Message::AnalyticsOptInChanged(v) => self.settings.analytics_opt_in = v,
             Message::OutputModeSelected(entity) => {
                 self.output_mode_model.activate(entity);
                 if let Some(mode) = self.output_mode_model.data::<&str>(entity) {
@@ -757,6 +771,7 @@ impl cosmic::Application for App {
                     output_mode: Some(self.settings.output_mode.clone()),
                     history_time_mode: Some(self.settings.history_time_mode.clone()),
                     stt_endpoint: Some(self.settings.stt_endpoint.clone()),
+                    analytics_opt_in: Some(self.settings.analytics_opt_in),
                     key: if self.settings.api_key.is_empty() {
                         None
                     } else {
@@ -784,6 +799,7 @@ impl cosmic::Application for App {
                     output_mode: self.settings.output_mode.clone(),
                     history_time_mode: self.settings.history_time_mode.clone(),
                     stt_endpoint: self.settings.stt_endpoint.clone(),
+                    analytics_opt_in: self.settings.analytics_opt_in,
                 };
                 // Reload so auth_mode reflects what STT will actually use.
                 return Task::batch([
@@ -1251,8 +1267,8 @@ impl App {
         } else {
             account_section = account_section
                 .add(
-                    settings::item::builder("Sign in (optional)")
-                        .description("Browser login for SuperGrok or X Premium+ plan access.")
+                    settings::item::builder(sign_in_item_title())
+                        .description(sign_in_item_description())
                         .control(widget::button::suggested("Sign in").on_press(Message::LoginXai)),
                 )
                 .add(
@@ -1297,12 +1313,9 @@ impl App {
                 ),
         );
 
-        // API key is the general path; plan sign-in is optional for SuperGrok / Premium+.
         let access_section = settings::section().title("About access").add(
             settings::item::builder("How speech works")
-                .description(
-                    "Bearer API key for cloud STT. SuperGrok / X Premium+ can sign in for plan access.",
-                )
+                .description(access_how_speech_works())
                 .control(
                     widget::button::link("Provider notes")
                         .on_press(Message::OpenUrl(
@@ -1350,6 +1363,27 @@ impl App {
                 .control(time_pick),
         );
 
+        let summary = if self.settings.analytics_summary.is_empty() {
+            "Nothing recorded yet."
+        } else {
+            self.settings.analytics_summary.as_str()
+        };
+        let analytics_section = settings::section()
+            .title("Usage numbers")
+            .add(
+                settings::item::builder("Share anonymous counts")
+                    .description(analytics_item_description())
+                    .toggler(
+                        self.settings.analytics_opt_in,
+                        Message::AnalyticsOptInChanged,
+                    ),
+            )
+            .add(
+                settings::item::builder("What you would see")
+                    .description("Same snapshot a maintainer would use. No words or audio.")
+                    .control(widget::text::body(summary.to_string())),
+            );
+
         // Colored capsules match the tray mic glyph (not mystery symbolic icons).
         let tray_section = settings::section()
             .title("Tray microphone")
@@ -1375,6 +1409,7 @@ impl App {
             speech_section.into(),
             output_section.into(),
             history_section.into(),
+            analytics_section.into(),
             tray_section.into(),
         ];
 

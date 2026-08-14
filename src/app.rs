@@ -98,6 +98,9 @@ pub struct App {
     /// Set when user cancels mid-record so StopCapture drops PCM instead of STT.
     discard_next_audio: bool,
     is_capturing: Arc<AtomicBool>,
+    /// Last tray notification (tests only — proves first-run copy).
+    #[cfg(test)]
+    last_notification: Option<(String, String)>,
 }
 
 impl App {
@@ -129,6 +132,8 @@ impl App {
             awaiting_audio: false,
             discard_next_audio: false,
             is_capturing: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            last_notification: None,
         }
     }
 
@@ -162,9 +167,8 @@ impl App {
         {
             self.execute_commands(vec![
                 Command::ShowNotification {
-                    title: "Set up speech access".into(),
-                    body: "Add an API key in Settings, or sign in with SuperGrok / X Premium+ (cosmic-scribe --login)."
-                        .into(),
+                    title: crate::product_copy::setup_needed_notification_title().into(),
+                    body: crate::product_copy::setup_needed_notification_body().into(),
                 },
                 Command::OpenSettings,
             ])
@@ -236,6 +240,7 @@ impl App {
 
     /// Side effects for user cancel (shortcut, tray, CLI) — before state transition.
     fn on_user_cancel(&mut self, from: &AppState) {
+        crate::analytics::default_store().record_action("cancel");
         match from {
             AppState::Recording => {
                 self.discard_next_audio = true;
@@ -349,8 +354,7 @@ impl App {
                         self.last_pre_encoded = None;
                         self.event_tx
                             .send(Event::Error(
-                                "No speech credentials — add an API key in Settings or run --login"
-                                    .into(),
+                                crate::product_copy::no_credentials_error().into(),
                             ))
                             .ok();
                         continue;
@@ -478,10 +482,12 @@ impl App {
                 SetTrayState(s) => self.tray.set_state(&s),
 
                 ShowNotification { title, body } => {
+                    #[cfg(test)]
+                    {
+                        self.last_notification = Some((title.clone(), body.clone()));
+                    }
                     #[cfg(not(test))]
                     {
-                        let _ = title;
-                        let _ = body;
                         if let Err(e) = std::process::Command::new("notify-send")
                             .arg(&title)
                             .arg(&body)
@@ -490,16 +496,19 @@ impl App {
                             tracing::warn!("notification failed: {e}");
                         }
                     }
-                    let _ = (&title, &body);
                 }
 
-                OpenHistory => {
+                OpenHistory =>
+                {
+                    #[cfg(not(test))]
                     if let Err(e) = crate::lifecycle::spawn_gui(false) {
                         tracing::warn!("failed to open history GUI: {e}");
                     }
                 }
 
-                OpenSettings => {
+                OpenSettings =>
+                {
+                    #[cfg(not(test))]
                     if let Err(e) = crate::lifecycle::spawn_gui(true) {
                         tracing::warn!("failed to open settings GUI: {e}");
                     }
@@ -662,6 +671,15 @@ mod tests {
 
         app.process_event(Event::Toggle).await;
         assert_eq!(app.current_state(), &AppState::Idle);
+        let (title, body) = app
+            .last_notification
+            .expect("idle without creds must notify");
+        assert_eq!(
+            title,
+            crate::product_copy::setup_needed_notification_title()
+        );
+        assert_eq!(body, crate::product_copy::setup_needed_notification_body());
+        assert!(crate::product_copy::sign_in_comes_before_api_key(&body));
     }
 
     #[tokio::test]

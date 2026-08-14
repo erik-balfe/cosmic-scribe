@@ -1,6 +1,6 @@
 # OSS release readiness
 
-Last reviewed: 2026-08-05
+Last reviewed: 2026-08-15
 
 **Docs:** [../README.md](../README.md) · [BACKLOG.md](BACKLOG.md)
 
@@ -34,8 +34,8 @@ Last reviewed: 2026-08-05
 - [x] No internal roadmap essay on GitHub  
 - [x] Tray screenshots in README (product identity)  
 - [ ] Optional: app-window screenshots of native GUI later  
-- [ ] `Cargo.toml` version + tag when cutting a release  
-- [ ] Push `master` when ready (explicit)  
+- [x] `Cargo.toml` version **0.5.0**  
+- [ ] Push `master` + tag `v0.5.0` (this cut)  
 - [ ] GitHub topics: `cosmic-desktop`, `dictation`, `wayland`, `speech-to-text`, `pop-os`  
 
 ## Known limitations (honest)
@@ -52,8 +52,8 @@ Last reviewed: 2026-08-05
 
 1. `./scripts/check.sh` green (core + web; gui-native excluded from clippy/test in CI)  
 2. Smoke: sign-in or API key, one dictation, History re-transcribe, Settings save  
-3. Bump `Cargo.toml` version (**0.4.0** for this feature ship; **v0.3.3 already exists** on GitHub)  
-4. `jj` commit if dirty · push `master` · tag `v0.4.0` · push tags  
+3. Bump `Cargo.toml` version (**0.5.0** this cut; do not retag **v0.4.1**)  
+4. `jj` commit if dirty · push `master` · tag `v0.5.0` · push tags  
 5. Verify CI release artifacts + formula  
 
 ## Pre-ship residual risks (accepted or deferred)

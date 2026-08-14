@@ -92,6 +92,8 @@ pub fn settings_is_dirty(
     saved_time: &str,
     saved_stt_endpoint: &str,
     api_key_was_empty: bool,
+    analytics_opt_in: bool,
+    saved_analytics_opt_in: bool,
 ) -> bool {
     if lang != saved_lang {
         return true;
@@ -105,6 +107,9 @@ pub fn settings_is_dirty(
     if stt_endpoint.trim() != saved_stt_endpoint.trim() {
         return true;
     }
+    if analytics_opt_in != saved_analytics_opt_in {
+        return true;
+    }
     // Typed key only dirties if non-empty (blank means “keep stored”).
     if !api_key_typed.is_empty() {
         return true;
@@ -112,6 +117,11 @@ pub fn settings_is_dirty(
     let _ = api_key_was_empty;
     false
 }
+
+pub use cosmic_scribe::product_copy::{
+    access_how_speech_works, active_auth_detail, active_auth_title, analytics_item_description,
+    sign_in_item_description, sign_in_item_title,
+};
 
 /// Show-more control belongs after list items when more pages exist.
 pub fn show_more_after_list(has_more: bool, entry_count: usize) -> bool {
@@ -137,25 +147,6 @@ pub fn history_after_probe(returned_count: usize, display_limit: usize) -> (usiz
 /// Whether another page may exist after a non-probe page fetch of `page_size`.
 pub fn history_has_more_after_page(returned: usize, page_size: usize) -> bool {
     returned >= page_size
-}
-
-/// What STT requests use right now (`oauth` | `api_key` | `api_key_env` | `none`).
-pub fn active_auth_title(mode: &str) -> &'static str {
-    match mode {
-        "oauth" => "Signed in",
-        "api_key" => "API key (saved here)",
-        "api_key_env" => "API key (from environment)",
-        _ => "Not set up yet",
-    }
-}
-
-pub fn active_auth_detail(mode: &str) -> &'static str {
-    match mode {
-        "oauth" => "Using your plan for speech recognition.",
-        "api_key" => "Using the API key saved on this computer.",
-        "api_key_env" => "Using the API key from your environment.",
-        _ => "Add an API key or sign in to start dictating.",
-    }
 }
 
 pub fn stored_api_key_status(has_stored: bool) -> &'static str {
@@ -291,7 +282,9 @@ mod tests {
             "clipboard",
             "relative",
             ep,
-            true
+            true,
+            false,
+            false
         ));
         assert!(settings_is_dirty(
             "en",
@@ -303,7 +296,9 @@ mod tests {
             "clipboard",
             "relative",
             ep,
-            true
+            true,
+            false,
+            false
         ));
         assert!(settings_is_dirty(
             "en",
@@ -315,7 +310,9 @@ mod tests {
             "clipboard",
             "relative",
             ep,
-            true
+            true,
+            false,
+            false
         ));
         assert!(settings_is_dirty(
             "en",
@@ -327,8 +324,46 @@ mod tests {
             "clipboard",
             "relative",
             ep,
-            true
+            true,
+            false,
+            false
         ));
+        assert!(settings_is_dirty(
+            "en",
+            "clipboard",
+            "relative",
+            ep,
+            "",
+            "en",
+            "clipboard",
+            "relative",
+            ep,
+            true,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn sign_in_is_ordinary_path_not_optional_hero() {
+        assert_eq!(sign_in_item_title(), "Sign in");
+        assert!(!sign_in_item_title()
+            .to_ascii_lowercase()
+            .contains("optional"));
+        assert!(sign_in_item_description().contains("SuperGrok"));
+        assert!(settings_description_ok(sign_in_item_description()));
+        let access = access_how_speech_works();
+        assert!(access.starts_with("Sign in"));
+        assert!(access.contains("API key"));
+        assert!(settings_description_ok(access));
+        let none = active_auth_detail("none").to_ascii_lowercase();
+        let sign_at = none.find("sign in").expect("sign in first");
+        let key_at = none.find("api key").expect("api key second");
+        assert!(sign_at < key_at);
+        assert!(settings_description_ok(analytics_item_description()));
+        assert!(analytics_item_description()
+            .to_ascii_lowercase()
+            .contains("off by default"));
     }
 
     #[test]

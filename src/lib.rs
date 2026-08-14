@@ -7,15 +7,18 @@ pub fn env_compat(primary: &str, legacy: &str) -> Option<String> {
         .or_else(|| std::env::var(legacy).ok())
 }
 
+pub mod analytics;
 pub mod api;
 pub mod app;
 pub mod audio;
 pub mod audio_validation;
+pub mod cli_help;
 pub mod injector;
 pub mod ipc;
 pub mod keyring;
 pub mod lifecycle;
 pub mod logging;
+pub mod product_copy;
 pub mod recording;
 pub mod state;
 pub mod stt;

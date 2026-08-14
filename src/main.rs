@@ -31,6 +31,11 @@ async fn main() -> anyhow::Result<()> {
     }
     check_deps();
 
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_usage();
+        return Ok(());
+    }
+
     if args.iter().any(|a| a == "--login") {
         let no_browser = args.iter().any(|a| a == "--no-browser");
         cosmic_scribe::xai_oauth::login_device_code(!no_browser)?;
@@ -51,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
             .cloned()
             .unwrap_or_default();
         ConfigFileKeyring.set_api_key(&key)?;
-        eprintln!("API key saved. Optional: --login if you use SuperGrok or X Premium+.");
+        eprintln!("API key saved. Ordinary path is --login (SuperGrok / X Premium+).");
         return Ok(());
     }
 
@@ -179,43 +184,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn print_usage() {
-    eprintln!("Cosmic Scribe — record → speech-to-text → insert text");
-    eprintln!();
-    eprintln!("Service (background daemon + tray):");
-    eprintln!(
-        "  --install            Stop daemon, install binary, enable systemd autostart, start"
-    );
-    eprintln!("  --install-from=PATH  Install from PATH (default: release/cargo if newer)");
-    eprintln!("  --update             Stop → install from this binary → start");
-    eprintln!("  --update-from=PATH   Same, but copy from PATH (e.g. new release build)");
-    eprintln!("  --start              Start daemon via systemd (or direct if not installed)");
-    eprintln!("  --stop | --quit      Stop daemon (tray goes away)");
-    eprintln!("  --restart            Stop then start daemon");
-    eprintln!("  --status             Running? installed path? IPC socket?");
-    eprintln!("  --uninstall          Stop daemon; remove ~/.local install + autostart");
-    eprintln!("  --purge              With --uninstall: also delete ~/.local/share/{APP_SLUG}/");
-    eprintln!("  --daemon             Run in foreground (used by systemd unit; not for daily use)");
-    eprintln!();
-    eprintln!("Dictation:");
-    eprintln!("  --trigger            Toggle recording on running daemon");
-    eprintln!("  --cancel             Abort recording or STT (bind e.g. Ctrl+Shift+Space)");
-    eprintln!("  --record-once        Record, transcribe, insert text, exit");
-    eprintln!("  --file-input=<path>  Transcribe pre-recorded raw PCM");
-    eprintln!();
-    eprintln!("Setup:");
-    eprintln!("  --login              Sign in (SuperGrok / X Premium+ plan access)");
-    eprintln!("  --logout             Sign out (API key left untouched)");
-    eprintln!("  --no-browser         With --login: print URL only (SSH/headless)");
-    eprintln!("  --configure          Interactive auth + language");
-    eprintln!("  --history            History window");
-    eprintln!("  --settings           Settings window");
-    eprintln!("  --autostart          Enable com.cosmic-scribe.service (graphical-session.target)");
-    eprintln!("  --set-key KEY        Store speech API key (or COSMIC_SCRIBE_API_KEY)");
-    eprintln!("  --clear-key          Remove stored API key");
-    eprintln!("  --set-lang LANG      Set speech language (default: en)");
-    eprintln!();
-    eprintln!("Speech endpoint (xAI dialect; see docs/STT_PROVIDERS.md):");
-    eprintln!("  COSMIC_SCRIBE_STT_URL  Full STT URL (default https://api.x.ai/v1/stt)");
+    eprintln!("{}", cosmic_scribe::cli_help::usage_text());
 }
 
 async fn trigger_mode() -> anyhow::Result<()> {
@@ -392,8 +361,7 @@ fn configure_mode() -> anyhow::Result<()> {
             "(not configured)"
         }
     );
-    println!("  API key:  --set-key  (or paste in Settings)");
-    println!("  optional: --login   (SuperGrok / X Premium+ plan access)\n");
+    println!("{}\n", cosmic_scribe::product_copy::configure_auth_help());
     println!("Language: {}\n", lang);
 
     print!("Sign in with SuperGrok / X Premium+ now? [Y/n]: ");

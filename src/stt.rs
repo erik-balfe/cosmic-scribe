@@ -178,6 +178,7 @@ impl SttClient for XaiSttClient {
                 codec = upload.codec,
                 "STT finished after OAuth retry"
             );
+            note_stt_analytics(audio.duration_ms, t0.elapsed().as_millis() as u64, &result);
             return result;
         }
 
@@ -190,7 +191,25 @@ impl SttClient for XaiSttClient {
             upload_bytes = upload.bytes.len(),
             "STT finished"
         );
+        note_stt_analytics(audio.duration_ms, t0.elapsed().as_millis() as u64, &result);
         result
+    }
+}
+
+fn note_stt_analytics(duration_ms: u64, stop_to_text_ms: u64, result: &Result<SttResult>) {
+    let auth = crate::xai_oauth::auth_status_label();
+    let text = result.as_ref().ok().map(|r| r.text.as_str());
+    crate::analytics::default_store().record_take(
+        duration_ms,
+        stop_to_text_ms,
+        auth,
+        result.is_ok(),
+        text,
+    );
+    if let Some(sink) = crate::analytics::HttpTelemetrySink::from_env() {
+        std::thread::spawn(move || {
+            let _ = crate::analytics::maybe_submit(&crate::analytics::default_store(), &sink);
+        });
     }
 }
 

@@ -12,6 +12,8 @@
   let error = $state('');
   let saving = $state(false);
   let apiKey = $state('');
+  let analyticsOptIn = $state(false);
+  let analyticsSummary = $state('');
 
   const outputOptions = [
     { value: 'wtype', label: 'Type into focus — inserts into the focused field (default)' },
@@ -38,6 +40,8 @@
       sttEndpoint = c.stt_endpoint || 'https://api.x.ai/v1/stt';
       hasKey = c.has_key;
       authMode = c.auth_mode || (c.has_key ? 'api_key' : 'none');
+      analyticsOptIn = !!c.analytics_opt_in;
+      analyticsSummary = c.analytics_summary || '';
     } catch {
       error = 'Failed to load settings';
     }
@@ -54,6 +58,7 @@
       output_mode: outputMode,
       history_time_mode: historyTimeMode,
       stt_endpoint: sttEndpoint,
+      analytics_opt_in: analyticsOptIn,
     };
     if (apiKey) body.key = apiKey;
     try {
@@ -131,8 +136,8 @@
   <section class="auth-block" aria-label="Account">
     <span class="legend-heading">Account</span>
     <p class="field-hint">
-      Cloud speech needs an API key. Optional: sign in with SuperGrok or X Premium+ for plan access
-      (<code>cosmic-scribe --login</code>).
+      Ordinary path: sign in with SuperGrok or X Premium+
+      (<code>cosmic-scribe --login</code>). An API key is a fallback.
     </p>
     <p class="field-hint auth-status">
       Connection:
@@ -170,6 +175,15 @@
     <span>History time labels</span>
     <Select options={timeModeOptions} bind:value={historyTimeMode} />
   </label>
+  <label class="analytics-row">
+    <span>Usage numbers</span>
+    <span class="field-hint">Off by default. Anonymous counts only — no words, audio, or who you are.</span>
+    <label class="check">
+      <input type="checkbox" bind:checked={analyticsOptIn} />
+      Share anonymous counts with developers
+    </label>
+    <span class="field-hint">{analyticsSummary || 'Off — nothing is recorded.'}</span>
+  </label>
   <div class="actions">
     <button class="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
     <span class="status" aria-live="polite">
@@ -190,6 +204,13 @@
     font-size: 13px;
     color: var(--text-muted);
     margin-bottom: 4px;
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    font-size: 14px;
   }
   .legend-intro { margin-bottom: 12px; }
   .legend-grid {

@@ -359,8 +359,8 @@ impl KeyringStore for ConfigFileKeyring {
         let path = key_path();
         let data = fs::read(&path).with_context(|| {
             format!(
-                "no speech credentials — set an API key (`--set-key` / Settings) \
-                 or run `cosmic-scribe --login` (SuperGrok / Premium+). Tried OAuth store and {}",
+                "{}; tried OAuth store and {}",
+                crate::product_copy::no_credentials_error(),
                 path.display()
             )
         })?;
