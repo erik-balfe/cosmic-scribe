@@ -8,7 +8,7 @@
 
 One global shortcut. A tray mic. No window required.
 
-Press the shortcut, speak, press again. The mic turns **red**, then **blue** for about a second, and the text is on your clipboard (and typed into the focused field if you want). Paste anywhere — notes, code, mail, chat, the browser.
+Press the shortcut, speak, press again. The mic turns **red**, then **blue** (typically well under a second on a home connection), and the text is on your clipboard (and typed into the focused field if you want). Paste anywhere — notes, code, mail, chat, the browser.
 
 Built for [COSMIC](https://github.com/pop-os/cosmic-epoch) on Pop!_OS and Fedora (Wayland). Transcription uses **cloud speech-to-text** with a Bearer **API key** (OpenAI-style auth). Default STT dialect is [xAI](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text); you can set the **endpoint URL** in Settings. Optional **plan sign-in** for SuperGrok / X Premium+. Full OpenAI Whisper compatibility is a different API shape — see [docs/STT_PROVIDERS.md](docs/STT_PROVIDERS.md) (contributions welcome).
 
@@ -31,7 +31,7 @@ Cosmic Scribe is **system-level**: same shortcut everywhere, near-zero chrome, c
 |---------|---------|
 | Tray mic, idle | Ready |
 | Capsule **red** | Recording — speak |
-| Capsule **blue** | Transcribing — usually ~1–2 seconds after you stop |
+| Capsule **blue** | Transcribing — typically **~0.3–1 s** after you stop (home internet; see below) |
 | Notification / clipboard | Text ready — **Ctrl+V** (or already typed in **wtype** mode) |
 
 Optional **History** and **Settings** windows (libcosmic / native COSMIC look when installed) for re-transcribe, edit, auth, and preferences — not required for the main loop.
@@ -47,9 +47,34 @@ Optional **History** and **Settings** windows (libcosmic / native COSMIC look wh
 - **API key for speech** — Settings, `--set-key`, or `COSMIC_SCRIBE_API_KEY` (Bearer key)
 - **Configurable STT endpoint** — Settings or `COSMIC_SCRIBE_STT_URL` (same dialect; default xAI)
 - **Optional plan sign-in** — `cosmic-scribe --login` for SuperGrok / X Premium+
-- **Fast after stop** — audio is encoded **while you speak** (progressive Opus); then batch STT
+- **Fast after stop** — audio is encoded **while you speak** (progressive Opus); then one batch STT request
 - **Clipboard + optional auto-type** — always copy; default mode also types into the focused field
 - **Local history** — re-listen, copy, edit, re-transcribe without recording again
+- **Cancel** — `cosmic-scribe --cancel` (e.g. Ctrl+Shift+Space) or tray; no paste, take discarded
+
+## Why it feels instant
+
+Encoding runs **during** the take, so after you stop we mostly **upload + wait on the speech API**. Measured on this project’s real daemon log (home connection, progressive Opus, 137 successful takes):
+
+| Take length | Stop → text (median) |
+|-------------|----------------------|
+| Under 5 s | **~0.3 s** |
+| 5–20 s | **~0.6 s** |
+| 20–60 s | **~1.0 s** |
+| Over 60 s | **~1.8 s** |
+| All takes | **~0.8 s** median (encode after stop ≈ 0–4 ms) |
+
+Typical compression ~10× vs raw PCM. No streaming STT: one final paste, not live captions.
+
+## Status
+
+| | |
+|--|--|
+| **Shipped** | Global trigger + cancel, tray mic, progressive Opus, batch xAI STT, OAuth or API key, native History/Settings, local history, re-transcribe |
+| **In progress / next** | Silence cutting on upload only (F13); OpenAI-style STT dialect (F7) |
+| **Not the product** | Streaming live captions; pause button; LLM “rewrite my dictation” (that invents words) |
+
+Punctuation and sentence structure come from the **speech model**, not a second Grok rewrite. We send `format=true` (inverse text normalization: spoken numbers → `$100`). We do **not** run a hidden tidy/full-rewrite pass — that is what Grok web uses for chat, and it often replaces rare but correct words. Language hint is in Settings (`en`, `ru`, …). Tracker: [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Quick start
 

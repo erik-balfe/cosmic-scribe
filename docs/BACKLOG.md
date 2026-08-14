@@ -4,7 +4,7 @@ Task tracker for bugs, features, and research. Update status as work progresses.
 
 **Statuses:** `open` · `in_progress` · `done` · `deferred`
 
-Last updated: 2026-08-05
+Last updated: 2026-08-15
 
 **Doc index:** [docs/README.md](README.md)
 
@@ -48,6 +48,7 @@ Last updated: 2026-08-05
 | F11 | **done** | Progressive Opus encode during capture | Finalize ~ms; REST upload OGG; `.raw` kept |
 | F12 | **wontfix** | Streaming STT (WebSocket) as core path | Not the product — PTT wants final paste; REST is the right (and cheaper list) path |
 | F13 | open | **Silence cutting (VAD)** on upload path only | **Not shipped.** No RMS hard-reject (false-positive safe). Future: conservative cut before STT; full `.raw` kept. Design: `docs/LOCAL/VAD-SILENCE.md`. No pause button. |
+| F14 | open | **Readable sentences / punctuation (esp. Russian)** | Root: xAI REST STT — `format=true` is **ITN** (numbers/currency), **not** punctuation restore. Punctuation is in-model; RU often weaker than EN. **No default LLM rewrite** (Grok web tidy/full-rewrite replaces rare words). Optional later: conservative punct-only pass, never silent full rewrite. |
 
 ---
 
